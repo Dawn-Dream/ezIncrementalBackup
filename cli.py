@@ -311,5 +311,26 @@ def apply_delete(deleted_list):
         except Exception as e:
             click.echo(f'删除失败: {d}，原因: {e}')
 
+@cli.command()
+def clean_source():
+    """清空配置文件中的源目录"""
+    import yaml
+    import shutil
+    from pathlib import Path
+    import os
+    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    source_dir = Path(config['source_dir'])
+    click.echo(f"正在清空源目录: {source_dir}")
+    if source_dir.exists():
+        for item in source_dir.iterdir():
+            if item.is_file() or item.is_symlink():
+                item.unlink()
+            elif item.is_dir():
+                shutil.rmtree(item)
+        click.echo(f"已清空目录: {source_dir}")
+    else:
+        click.echo(f"源目录不存在: {source_dir}，无需清空")
+
 if __name__ == '__main__':
     cli() 
