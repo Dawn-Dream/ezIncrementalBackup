@@ -1,0 +1,11 @@
+source_dir: ./test
+backup_type: incremental  # full or incremental
+compress: true
+split_size_mb: 1024       # 分卷大小，单位MB
+target:
+  type: local             # local or webdav
+  path: ./test-bk   # 本地路径
+  url: https://webdav.example.com/backup  # WebDAV地址
+  username: user
+  password: pass
+schedule: "0 2 * * *"     # cron表达式，凌晨2点自动备份 

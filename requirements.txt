@@ -1,0 +1,5 @@
+click
+py7zr
+webdavclient3
+PyYAML
+tqdm 
