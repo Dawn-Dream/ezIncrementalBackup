@@ -3,6 +3,7 @@ from pathlib import Path
 import yaml
 import subprocess
 import os
+import sys
 
 def main_menu():
     while True:
@@ -69,7 +70,7 @@ def snapshot_restore():
     snap = questionary.select("请选择要还原的快照：", choices=[str(s.name) for s in snaps]).ask()
     if snap:
         print(f"正在还原快照: {snap} ...")
-        subprocess.run(["python", "cli.py", "restore-all", f"snapshot/{snap}", "--to-source"], check=True)
+        subprocess.run([sys.executable, "-m", "ezIncrementalBackup.cli", "restore-all", f"snapshot/{snap}", "--to-source"], check=True)
         print("还原完成！")
 
 def package_browse():
@@ -93,7 +94,7 @@ def package_browse():
         if restore_target_dir:
             print(f"正在还原包: {pkg_path} 到 {restore_target_dir} ...")
             try:
-                subprocess.run(["python", "cli.py", "restore", str(pkg_path), "--target-dir", restore_target_dir], check=True)
+                subprocess.run([sys.executable, "-m", "ezIncrementalBackup.cli", "restore", str(pkg_path), "--target-dir", restore_target_dir], check=True)
                 print("还原完成！")
             except subprocess.CalledProcessError as e:
                 print(f"还原失败: {e}")
@@ -123,19 +124,19 @@ def delete_apply():
     dfile = questionary.select("请选择要应用的删除清单：", choices=[str(d.name) for d in dels]).ask()
     if dfile:
         print(f"正在应用删除清单: {dfile} ...")
-        subprocess.run(["python", "cli.py", "apply-delete", dfile], check=True)
+        subprocess.run([sys.executable, "-m", "ezIncrementalBackup.cli", "apply-delete", dfile], check=True)
         print("删除操作完成！")
 
 def backup(btype):
     print(f"正在执行{btype}备份...")
-    subprocess.run(["python", "cli.py", "backup", "--type", btype, "--compress", "--split-size", "1024"], check=True)
+    subprocess.run([sys.executable, "-m", "ezIncrementalBackup.cli", "backup", "--type", btype, "--compress", "--split-size", "1024"], check=True)
     print("备份完成！")
 
 def clean_source_wizard():
     if questionary.confirm("确认清空源目录吗？此操作不可逆！").ask():
         print("正在清空源目录...")
         try:
-            subprocess.run(["python", "cli.py", "clean-source"], check=True)
+            subprocess.run([sys.executable, "-m", "ezIncrementalBackup.cli", "clean-source"], check=True)
             print("源目录已清空！")
         except subprocess.CalledProcessError as e:
             print(f"清空失败: {e}")
