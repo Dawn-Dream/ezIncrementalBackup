@@ -66,21 +66,18 @@ def compress_files_with_split(file_list, archive_path, split_size_mb=1024, base_
     archive = Path(archive_path)
     split_size = f"-v{split_size_mb}m"
     if is_7z_available():
-        # 先写入一个临时文件列表
+        # 先写入一个临时文件列表（用相对路径）
         filelist_path = archive.parent / "_filelist.txt"
         with open(filelist_path, 'w', encoding='utf-8') as f:
             for file_path in file_list:
-                if base_dir:
-                    rel_path = os.path.relpath(file_path, base_dir)
-                    f.write(f"{file_path}\n")
-                else:
-                    f.write(f"{file_path}\n")
+                rel_path = os.path.relpath(file_path, base_dir) if base_dir else file_path
+                f.write(f"{rel_path}\n")
         cmd = [
             "7z", "a", "-t7z", "-m0=lzma2", "-mx=3", "-mmt=on", split_size,
-            str(archive), f"@{filelist_path}"
+            str(archive), f"@{filelist_path}", "-spf2"
         ]
         print(f"[7z] 正在压缩: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=base_dir if base_dir else None)
         filelist_path.unlink(missing_ok=True)
         if result.returncode != 0:
             print(result.stdout)
