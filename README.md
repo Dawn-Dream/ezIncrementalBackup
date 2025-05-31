@@ -41,7 +41,10 @@ schedule: "0 2 * * *"     # cron表达式，凌晨2点自动备份
 ```bash
 ezbackup init
 ```
-
+### 新增：gui界面
+```bash
+python cli.py --gui
+```
 ### 全量备份
 ```bash
 ezbackup backup --type full --compress --split-size 1024
