@@ -19,21 +19,16 @@ def compress_with_split(source_dir, archive_path, split_size_mb=1024):
     archive = Path(archive_path)
     split_size = f"-v{split_size_mb}m"
     if is_7z_available():
-        # 7z命令行压缩，支持多线程
         cmd = [
             "7z", "a", "-t7z", "-m0=lzma2", "-mx=3", "-mmt=on", split_size,
             str(archive), str(source)
         ]
         print(f"[7z] 正在压缩: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd)  # 直接输出到终端
         if result.returncode != 0:
-            print(result.stdout)
-            print(result.stderr)
             raise RuntimeError("7z 压缩失败")
-        # 返回所有分卷文件名
         parts = sorted(archive.parent.glob(f"{archive.name}.part*"))
         if not parts:
-            # 只有一个包
             parts = [archive]
         return [str(p) for p in parts]
     else:
@@ -66,7 +61,6 @@ def compress_files_with_split(file_list, archive_path, split_size_mb=1024, base_
     archive = Path(archive_path)
     split_size = f"-v{split_size_mb}m"
     if is_7z_available():
-        # 先写入一个临时文件列表（用相对路径）
         filelist_path = archive.parent / "_filelist.txt"
         with open(filelist_path, 'w', encoding='utf-8') as f:
             for file_path in file_list:
@@ -77,11 +71,9 @@ def compress_files_with_split(file_list, archive_path, split_size_mb=1024, base_
             str(archive), f"@{filelist_path}", "-spf2"
         ]
         print(f"[7z] 正在压缩: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd=base_dir if base_dir else None)
+        result = subprocess.run(cmd, cwd=base_dir if base_dir else None)  # 直接输出到终端
         filelist_path.unlink(missing_ok=True)
         if result.returncode != 0:
-            print(result.stdout)
-            print(result.stderr)
             raise RuntimeError("7z 压缩失败")
         parts = sorted(archive.parent.glob(f"{archive.name}.part*"))
         if not parts:
