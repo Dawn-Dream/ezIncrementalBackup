@@ -4,3 +4,6 @@
 /.cursor
 /snapshot
 /test-bk
+/dist
+/build
+*.egg-info/

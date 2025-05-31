@@ -9,6 +9,8 @@ from backup.webdav import upload_to_webdav
 import datetime
 import tempfile
 import json
+import sys
+import subprocess
 
 CONFIG_PATH = 'config.yaml'
 SNAPSHOT_PATH = 'snapshot/last_snapshot.json'
@@ -331,6 +333,11 @@ def clean_source():
         click.echo(f"已清空目录: {source_dir}")
     else:
         click.echo(f"源目录不存在: {source_dir}，无需清空")
+
+if '--gui' in sys.argv:
+    sys.argv.remove('--gui')
+    subprocess.run([sys.executable, 'cli_wizard.py'])
+    sys.exit(0)
 
 if __name__ == '__main__':
     cli() 
