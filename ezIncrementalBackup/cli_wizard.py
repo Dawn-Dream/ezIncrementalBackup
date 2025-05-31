@@ -129,7 +129,7 @@ def delete_apply():
 
 def backup(btype):
     print(f"正在执行{btype}备份...")
-    subprocess.run([sys.executable, "-m", "ezIncrementalBackup.cli", "backup", "--type", btype, "--compress", "--split-size", "1024"], check=True)
+    subprocess.run([sys.executable, "-m", "ezIncrementalBackup.cli", "backup"], check=True)
     print("备份完成！")
 
 def clean_source_wizard():
