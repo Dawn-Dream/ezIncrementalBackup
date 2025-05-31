@@ -39,7 +39,10 @@ schedule: "0 2 * * *"     # cron表达式，凌晨2点自动备份
 ```bash
 python cli.py init
 ```
-
+### 新增：gui界面
+```bash
+python cli.py --gui
+```
 ### 全量备份
 ```bash
 python cli.py backup --type full --compress --split-size 1024
