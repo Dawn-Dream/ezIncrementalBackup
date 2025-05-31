@@ -2,10 +2,10 @@ import click
 import yaml
 import os
 from pathlib import Path
-from backup.full import full_backup
-from backup.incremental import incremental_backup, file_md5
-from backup.compress import compress_with_split, compress_files_with_split
-from backup.webdav import upload_to_webdav
+from .backup.full import full_backup
+from .backup.incremental import incremental_backup, file_md5
+from .backup.compress import compress_with_split, compress_files_with_split
+from .backup.webdav import upload_to_webdav
 import datetime
 import tempfile
 import json
@@ -17,7 +17,11 @@ SNAPSHOT_PATH = 'snapshot/last_snapshot.json'
 
 @click.group()
 def cli():
-    """ezIncrementalBackup 命令行工具"""
+    """ezIncrementalBackup 命令行工具
+
+    额外参数:
+      --gui    启动交互式向导界面
+    """
     pass
 
 @cli.command()
@@ -336,7 +340,9 @@ def clean_source():
 
 if '--gui' in sys.argv:
     sys.argv.remove('--gui')
-    subprocess.run([sys.executable, 'cli_wizard.py'])
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    wizard_path = os.path.join(base_dir, 'cli_wizard.py')
+    subprocess.run([sys.executable, wizard_path])
     sys.exit(0)
 
 if __name__ == '__main__':
