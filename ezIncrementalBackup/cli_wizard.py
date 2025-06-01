@@ -85,7 +85,15 @@ def snapshot_restore():
         print("还原完成！")
 
 def package_browse():
-    target_dir = questionary.text("请输入备份包所在目录 (默认为 ./test-bk):", default="./test-bk").ask()
+    # 自动读取配置文件里的 target.path
+    config_path = Path("config.yaml")
+    if config_path.exists():
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        default_dir = config.get('target', {}).get('path', './test-bk')
+    else:
+        default_dir = './test-bk'
+    target_dir = questionary.text(f"请输入备份包所在目录 (默认为 {default_dir}):", default=default_dir).ask()
     pkg_dir = Path(target_dir)
     if not pkg_dir.exists():
         print(f"目录不存在: {pkg_dir}")
@@ -143,17 +151,33 @@ def delete_apply():
 
 def backup(btype):
     print(f"正在执行{btype}备份...")
-    subprocess.run([sys.executable, "-m", "ezIncrementalBackup.cli", "backup"], check=True)
+    subprocess.run([sys.executable, "-m", "ezIncrementalBackup.cli", "backup", "--type", btype], check=True)
     print("备份完成！")
+
+def is_excluded(item, source_dir, exclude_dirs):
+    rel_path = os.path.relpath(item, source_dir).replace("\\", "/")
+    return any(rel_path == ex or rel_path.startswith(ex + "/") for ex in exclude_dirs)
 
 def clean_source_wizard():
     if questionary.confirm("确认清空源目录吗？此操作不可逆！").ask():
         print("正在清空源目录...")
-        try:
-            subprocess.run([sys.executable, "-m", "ezIncrementalBackup.cli", "clean-source"], check=True)
+        with open('config.yaml', 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        source_dir = Path(config['source_dir'])
+        exclude_dirs = set(config.get('exclude_dirs', []))
+        if source_dir.exists():
+            for item in source_dir.iterdir():
+                if is_excluded(item, source_dir, exclude_dirs):
+                    print(f"跳过保护目录: {item}")
+                    continue
+                if item.is_file() or item.is_symlink():
+                    item.unlink()
+                elif item.is_dir():
+                    import shutil
+                    shutil.rmtree(item)
             print("源目录已清空！")
-        except subprocess.CalledProcessError as e:
-            print(f"清空失败: {e}")
+        else:
+            print(f"源目录不存在: {source_dir}，无需清空")
 
 if __name__ == "__main__":
     main_menu() 
