@@ -315,7 +315,7 @@ def restore_all(snapshot_file, target_dir, to_source):
         target_dir = str(target_dir)
         try:
             result = subprocess.run([
-                '7z', 'x', pkg, f'-o{target_dir}', '-y'
+                '7z', 'x', pkg, f'-o{target_dir}', '-y', '-mmt=on'
             ], check=True)
             return True
         except Exception as e:
