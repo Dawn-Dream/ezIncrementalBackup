@@ -33,10 +33,11 @@ def save_snapshot(snapshot_path, data):
     with open(snapshot_path, 'w') as f:
         json.dump(data, f, indent=2)
 
-def incremental_backup(source_dir, snapshot_path, exclude_dirs=None):
+def incremental_backup(source_dir, snapshot_path, exclude_dirs=None, workers=None):
     """
     执行增量备份，只返回有变化的文件和被删除的文件/目录列表。
     exclude_dirs: 需要排除的目录名列表（只排除一级目录名）
+    workers: 并发进程数，None=自动
     """
     source = Path(source_dir)
     prev_snapshot = load_snapshot(snapshot_path)
@@ -56,7 +57,7 @@ def incremental_backup(source_dir, snapshot_path, exclude_dirs=None):
             all_files.append(str(Path(root) / file))
     # 多进程并发计算 stat+md5
     with tqdm(total=len(all_files), desc='增量快照', unit='file') as pbar:
-        with ProcessPoolExecutor() as executor:
+        with ProcessPoolExecutor(max_workers=workers) as executor:
             future_to_path = {executor.submit(get_file_info, f): f for f in all_files}
             for future in as_completed(future_to_path):
                 path, info = future.result()

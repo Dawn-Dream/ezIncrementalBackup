@@ -66,7 +66,8 @@ def init():
 @click.option('--type', type=click.Choice(['full', 'incremental']), default=None, help='备份类型')
 @click.option('--compress/--no-compress', default=None, help='是否压缩')
 @click.option('--split-size', type=int, default=None, help='分卷大小（MB）')
-def backup(type, compress, split_size):
+@click.option('--workers', type=int, default=None, help='并发进程数')
+def backup(type, compress, split_size, workers):
     """执行备份操作"""
     # 读取配置
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
@@ -78,6 +79,7 @@ def backup(type, compress, split_size):
     target = config['target']
     exclude_dirs = set(config.get('exclude_dirs', []))
     target_dir = target.get('path', './backup_output')
+    workers = workers or config.get('workers', None)
     Path(target_dir).mkdir(parents=True, exist_ok=True)
     Path('snapshot').mkdir(exist_ok=True)
 
@@ -134,7 +136,7 @@ def backup(type, compress, split_size):
             json.dump(snapshot, f, indent=2)
     else:
         click.echo('执行增量备份...')
-        changed, deleted = incremental_backup(source_dir, SNAPSHOT_PATH, exclude_dirs=exclude_dirs)
+        changed, deleted = incremental_backup(source_dir, SNAPSHOT_PATH, exclude_dirs=exclude_dirs, workers=workers)
         files_to_pack = changed.copy()
         deleted_list_arcname = None
         valid_deleted = []
