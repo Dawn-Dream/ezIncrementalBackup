@@ -56,17 +56,31 @@ def incremental_backup(source_dir, snapshot_path, exclude_dirs=None, workers=Non
                 continue
             all_files.append(str(Path(root) / file))
     # 多进程并发计算 stat+md5
-    with tqdm(total=len(all_files), desc='增量快照', unit='file') as pbar:
-        with ProcessPoolExecutor(max_workers=workers) as executor:
-            future_to_path = {executor.submit(get_file_info, f): f for f in all_files}
-            for future in as_completed(future_to_path):
-                path, info = future.result()
-                new_snapshot[path] = info
-                prev_info = prev_snapshot.get(path)
-                if prev_info != info:
-                    changed_files.append(path)
-                current_paths.add(path)
-                pbar.update(1)
+    try:
+        with tqdm(total=len(all_files), desc='增量快照', unit='file') as pbar:
+            with ProcessPoolExecutor(max_workers=workers) as executor:
+                future_to_path = {executor.submit(get_file_info, f): f for f in all_files}
+                for future in as_completed(future_to_path):
+                    try:
+                        path, info = future.result()
+                        new_snapshot[path] = info
+                        prev_info = prev_snapshot.get(path)
+                        if prev_info != info:
+                            changed_files.append(path)
+                        current_paths.add(path)
+                        pbar.update(1)
+                    except Exception as e:
+                        pbar.close()
+                        executor.shutdown(cancel_futures=True, wait=False)
+                        raise e
+    except KeyboardInterrupt:
+        print("\n用户中断，正在优雅终止所有子进程...")
+        try:
+            executor.shutdown(cancel_futures=True, wait=False)
+        except Exception:
+            pass
+        pbar.close()
+        raise SystemExit("已终止备份任务。")
     # 统计当前所有目录
     for root, dirs, files in os.walk(source):
         rel_root = os.path.relpath(root, source).replace("\\", "/")
