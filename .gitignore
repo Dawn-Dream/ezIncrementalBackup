@@ -10,3 +10,5 @@ ezIncrementalBackup/__pycache__/cli.cpython-311.pyc
 ezIncrementalBackup/backup/__pycache__/full.cpython-311.pyc
 ezIncrementalBackup/backup/__pycache__/incremental.cpython-311.pyc
 *.pyc
+ezIncrementalBackup/__pycache__/cli.cpython-311.pyc
+*.pyc

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from hashlib import md5
 from tqdm import tqdm
+from ..utils import is_excluded_path
 
 def file_md5(path):
     hash_md5 = md5()
@@ -36,13 +37,17 @@ def incremental_backup(source_dir, snapshot_path, exclude_dirs=None):
     # 统计总文件数
     total_files = 0
     for root, dirs, files in os.walk(source):
-        dirs[:] = [d for d in dirs if d not in exclude_dirs]
+        rel_root = os.path.relpath(root, source).replace("\\", "/")
+        dirs[:] = [d for d in dirs if not is_excluded_path((rel_root + "/" + d).lstrip("/"), exclude_dirs)]
         total_files += len(files)
     with tqdm(total=total_files, desc='增量快照', unit='file') as pbar:
         for root, dirs, files in os.walk(source):
-            # 跳过排除目录
-            dirs[:] = [d for d in dirs if d not in exclude_dirs]
+            rel_root = os.path.relpath(root, source).replace("\\", "/")
+            dirs[:] = [d for d in dirs if not is_excluded_path((rel_root + "/" + d).lstrip("/"), exclude_dirs)]
             for file in files:
+                rel_file = (rel_root + "/" + file).lstrip("/")
+                if is_excluded_path(rel_file, exclude_dirs):
+                    continue
                 src_file = Path(root) / file
                 file_stat = src_file.stat()
                 file_hash = file_md5(src_file)

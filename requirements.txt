@@ -4,3 +4,4 @@ webdavclient3
 PyYAML
 tqdm 
 questionary
+setuptools

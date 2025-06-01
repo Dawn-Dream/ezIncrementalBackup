@@ -1,7 +1,8 @@
 backup_type: incremental
 compress: true
 exclude_dirs:
-- data
+- build/fuckup
+- sd
 schedule: 0 2 * * *
 source_dir: ./test
 split_size_mb: 1024

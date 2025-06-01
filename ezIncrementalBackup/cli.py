@@ -14,6 +14,8 @@ import subprocess
 from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import re
+import py7zr
+from .utils import is_excluded_path
 
 CONFIG_PATH = 'config.yaml'
 SNAPSHOT_PATH = 'snapshot/last_snapshot.json'
@@ -27,9 +29,23 @@ def get_file_info(path):
         'md5': file_md5(p)
     }
 
+def safe_rmtree(path, source_dir, exclude_dirs):
+    rel_path = os.path.relpath(path, source_dir).replace("\\", "/")
+    if is_excluded_path(rel_path, exclude_dirs):
+        return
+    if path.is_file() or path.is_symlink():
+        path.unlink()
+    elif path.is_dir():
+        for item in list(path.iterdir()):
+            safe_rmtree(item, source_dir, exclude_dirs)
+        if len(list(path.iterdir())) == 0 and not is_excluded_path(rel_path, exclude_dirs):
+            path.rmdir()
+
 @click.group()
 def cli():
     """ezIncrementalBackup 命令行工具
+
+    注意：webdav未经过实验！推荐使用本地备份
 
     额外参数:
       --gui    启动交互式向导界面
@@ -77,24 +93,33 @@ def backup(type, compress, split_size):
             # 获取所有文件列表
             all_files = []
             for root, dirs, files in os.walk(source_dir):
-                # 跳过排除目录
-                dirs[:] = [d for d in dirs if d not in exclude_dirs]
+                rel_root = os.path.relpath(root, source_dir).replace("\\", "/")
+                # 递归过滤目录
+                dirs[:] = [d for d in dirs if not is_excluded_path((rel_root + "/" + d).lstrip("/"), exclude_dirs)]
                 for file in files:
+                    rel_file = (rel_root + "/" + file).lstrip("/")
+                    if is_excluded_path(rel_file, exclude_dirs):
+                        continue
                     all_files.append(str(Path(root) / file))
             archive_path = Path(target_dir) / f'full_{now_str}.7z'
             parts = compress_files_with_split(all_files, archive_path, split_size_mb, base_dir=source_dir)
             click.echo(f'生成分卷: {parts}')
         else:
             click.echo('未启用压缩，直接复制源文件到目标目录...')
-            full_backup(source_dir, target_dir)
+            full_backup(source_dir, target_dir, exclude_dirs=exclude_dirs)
             parts = [str(p) for p in Path(target_dir).glob('*') if p.is_file()]
         # 全量备份后生成快照
         snapshot = {}
         # 统计所有文件路径
         all_files = []
         for root, dirs, files in os.walk(source_dir):
-            dirs[:] = [d for d in dirs if d not in exclude_dirs]
+            rel_root = os.path.relpath(root, source_dir).replace("\\", "/")
+            # 递归过滤目录
+            dirs[:] = [d for d in dirs if not is_excluded_path((rel_root + "/" + d).lstrip("/"), exclude_dirs)]
             for file in files:
+                rel_file = (rel_root + "/" + file).lstrip("/")
+                if is_excluded_path(rel_file, exclude_dirs):
+                    continue
                 all_files.append(str(Path(root) / file))
         with tqdm(total=len(all_files), desc='生成快照', unit='file') as pbar:
             with ProcessPoolExecutor() as executor:
@@ -261,16 +286,22 @@ def restore_all(snapshot_file, target_dir, to_source):
     with open('config.yaml', 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     backup_dir = Path(config['target']['path'])
+    exclude_dirs = set(config.get('exclude_dirs', []))
     if to_source:
         target_dir = Path(config['source_dir'])
         click.echo(f'自动还原到源目录: {target_dir}')
-        # 自动清空源目录
         if target_dir.exists():
+            items = [item for item in target_dir.iterdir() if not is_excluded_path(os.path.relpath(item, target_dir).replace("\\", "/"), exclude_dirs)]
+            if items:
+                click.echo('还原前将清空以下内容：')
+                for item in items:
+                    click.echo(str(item))
+                confirm = input('确认要清空这些内容并还原吗？(y/yes 才会执行): ').strip().lower()
+                if confirm not in ('y', 'yes'):
+                    click.echo('操作已取消，未清空也未还原。')
+                    return
             for item in target_dir.iterdir():
-                if item.is_file() or item.is_symlink():
-                    item.unlink()
-                elif item.is_dir():
-                    shutil.rmtree(item)
+                safe_rmtree(item, target_dir, exclude_dirs)
             click.echo(f'已清空目录: {target_dir}')
         else:
             target_dir.mkdir(parents=True, exist_ok=True)
@@ -336,15 +367,11 @@ def restore_all(snapshot_file, target_dir, to_source):
             click.echo('7z 命令行解压中，请关注终端输出进度...')
             extracted = try_7z_extract(full_pkg, target_dir)
         if not extracted:
-            import py7zr
-            from tqdm import tqdm
             try:
+                click.echo('使用 py7zr 解压中，请稍候...')
                 with py7zr.SevenZipFile(full_pkg, mode='r') as z:
-                    all_names = z.getnames()
-                    with tqdm(total=len(all_names), desc='解压进度', unit='file') as pbar:
-                        def progress_callback(filename):
-                            pbar.update(1)
-                        z.extractall(path=str(target_dir), callback=progress_callback)
+                    z.extractall(path=str(target_dir))
+                click.echo('py7zr 解压完成。')
                 extracted = True
             except Exception as e:
                 click.echo(f'py7zr 解压失败: {e}')
@@ -367,23 +394,39 @@ def apply_delete(deleted_list):
     with open('config.yaml', 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     source_dir = Path(config['source_dir'])
+    exclude_dirs = set(config.get('exclude_dirs', []))
     with open(deleted_list, 'r', encoding='utf-8') as f:
         lines = [line.strip() for line in f if line.strip()]
     files = []
     dirs = []
+    to_delete = []
     for rel_path in lines:
-        abs_path = source_dir.parent / rel_path if not str(source_dir) in rel_path else Path(rel_path)
+        rel_path_norm = rel_path.replace("\\", "/")
+        if is_excluded_path(rel_path_norm, exclude_dirs):
+            click.echo(f'跳过保护目录/文件: {rel_path}')
+            continue
+        abs_path = source_dir / rel_path_norm
         if abs_path.exists():
+            to_delete.append(abs_path)
             if abs_path.is_file() or abs_path.is_symlink():
                 files.append(abs_path)
             elif abs_path.is_dir():
                 dirs.append(abs_path)
         else:
             click.echo(f'未找到: {abs_path}')
+    # 删除前确认
+    if to_delete:
+        click.echo('即将删除以下文件/目录：')
+        for p in to_delete:
+            click.echo(str(p))
+        confirm = input('确认要删除这些文件/目录吗？(y/yes 才会执行): ').strip().lower()
+        if confirm not in ('y', 'yes'):
+            click.echo('操作已取消，未删除任何文件/目录。')
+            return
     # 先删文件
     for f in files:
         try:
-            f.unlink()
+            safe_rmtree(f, source_dir, exclude_dirs)
             click.echo(f'已删除文件: {f}')
         except Exception as e:
             click.echo(f'删除失败: {f}，原因: {e}')
@@ -391,7 +434,7 @@ def apply_delete(deleted_list):
     dirs = sorted(dirs, key=lambda x: -len(str(x)))
     for d in dirs:
         try:
-            shutil.rmtree(d)
+            safe_rmtree(d, source_dir, exclude_dirs)
             click.echo(f'已删除文件夹: {d}')
         except Exception as e:
             click.echo(f'删除失败: {d}，原因: {e}')
@@ -406,13 +449,11 @@ def clean_source():
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     source_dir = Path(config['source_dir'])
+    exclude_dirs = set(config.get('exclude_dirs', []))
     click.echo(f"正在清空源目录: {source_dir}")
     if source_dir.exists():
         for item in source_dir.iterdir():
-            if item.is_file() or item.is_symlink():
-                item.unlink()
-            elif item.is_dir():
-                shutil.rmtree(item)
+            safe_rmtree(item, source_dir, exclude_dirs)
         click.echo(f"已清空目录: {source_dir}")
     else:
         click.echo(f"源目录不存在: {source_dir}，无需清空")
