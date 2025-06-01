@@ -151,7 +151,22 @@ def delete_apply():
 
 def backup(btype):
     print(f"正在执行{btype}备份...")
-    subprocess.run([sys.executable, "-m", "ezIncrementalBackup.cli", "backup", "--type", btype], check=True)
+    # 读取 config.yaml，提示并支持 workers
+    config_path = Path("config.yaml")
+    workers = None
+    if config_path.exists():
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        workers = config.get('workers', None)
+    # 交互式询问是否自定义进程数
+    if questionary.confirm("是否自定义并发进程数（多核加速）？").ask():
+        workers_input = questionary.text(f"请输入进程数（留空=自动，当前配置={workers}）:").ask()
+        if workers_input:
+            workers = workers_input
+    cmd = [sys.executable, "-m", "ezIncrementalBackup.cli", "backup", "--type", btype]
+    if workers:
+        cmd += ["--workers", str(workers)]
+    subprocess.run(cmd, check=True)
     print("备份完成！")
 
 def is_excluded(item, source_dir, exclude_dirs):
