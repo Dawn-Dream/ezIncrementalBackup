@@ -90,9 +90,10 @@ def package_browse():
     if not pkg_dir.exists():
         print(f"目录不存在: {pkg_dir}")
         return
-    pkgs = sorted(pkg_dir.glob("*.7z"))
+    # 同时查找 .7z 和 .7z.001 文件
+    pkgs = sorted(list(pkg_dir.glob("*.7z")) + list(pkg_dir.glob("*.7z.001")))
     if not pkgs:
-        print("未找到备份包文件 (.7z)！")
+        print("未找到备份包文件 (.7z 或 .7z.001)！")
         return
     pkg_names = [str(p.name) for p in pkgs]
     choice = questionary.select("请选择要操作的备份包：", choices=pkg_names + ["返回主菜单"]).ask()
@@ -105,6 +106,7 @@ def package_browse():
         if restore_target_dir:
             print(f"正在还原包: {pkg_path} 到 {restore_target_dir} ...")
             try:
+                print("如为分卷包，请确保所有分卷都在同一目录，仅需选择 .7z.001 文件即可！")
                 subprocess.run([sys.executable, "-m", "ezIncrementalBackup.cli", "restore", str(pkg_path), "--target-dir", restore_target_dir], check=True)
                 print("还原完成！")
             except subprocess.CalledProcessError as e:
