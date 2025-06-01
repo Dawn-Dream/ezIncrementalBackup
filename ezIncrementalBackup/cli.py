@@ -13,6 +13,7 @@ import sys
 import subprocess
 from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import re
 
 CONFIG_PATH = 'config.yaml'
 SNAPSHOT_PATH = 'snapshot/last_snapshot.json'
@@ -256,10 +257,11 @@ def restore_all(snapshot_file, target_dir, to_source):
         click.echo('快照文件名格式不正确！')
         return
     ts = m.group(1)
-    # 2. 选择还原目录
+    # 2. 选择还原目录和备份包目录
+    with open('config.yaml', 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    backup_dir = Path(config['target']['path'])
     if to_source:
-        with open('config.yaml', 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
         target_dir = Path(config['source_dir'])
         click.echo(f'自动还原到源目录: {target_dir}')
         # 自动清空源目录
@@ -275,22 +277,34 @@ def restore_all(snapshot_file, target_dir, to_source):
     else:
         target_dir = Path(target_dir) if target_dir else Path('.')
     # 3. 找到全量包和所有相关增量包
-    backup_dir = Path('test-bk') if Path('test-bk').exists() else Path('.')
     all_pkgs = sorted(list(backup_dir.glob('*.7z')) + list(backup_dir.glob('*.7z.001')))
-    full_pkg = None
-    incr_pkgs = []
+    # 构建基名到包的映射，优先 .7z.001
+    pkg_map = {}
     for pkg in all_pkgs:
-        pkg_name = pkg.stem
-        if pkg_name.startswith('full_'):
-            if pkg_name[5:] <= ts:
-                full_pkg = pkg
-        elif pkg_name.startswith('incremental_'):
-            if pkg_name[12:] <= ts:
-                incr_pkgs.append(pkg)
+        m = re.match(r'(full_\d{8}_\d{6}|incremental_\d{8}_\d{6})\.7z(\.001)?$', pkg.name)
+        if m:
+            base = m.group(1)
+            # 优先 .7z.001
+            if base not in pkg_map or str(pkg).endswith('.7z.001'):
+                pkg_map[base] = pkg
+    # 选取最接近快照时间戳且不大于快照的全量包
+    full_pkg = None
+    for base, pkg in pkg_map.items():
+        if base.startswith('full_'):
+            if base[5:] <= ts:
+                if (not full_pkg) or (base[5:] > full_pkg[0][5:]):
+                    full_pkg = (base, pkg)
+    # 选取所有相关增量包
+    incr_pkgs = []
+    for base, pkg in pkg_map.items():
+        if base.startswith('incremental_'):
+            if base[12:] <= ts:
+                incr_pkgs.append((base, pkg))
+    incr_pkgs = [p[1] for p in sorted(incr_pkgs, key=lambda x: x[0][12:])]
     if not full_pkg:
         click.echo('未找到对应的全量包！')
         return
-    incr_pkgs = sorted(incr_pkgs, key=lambda p: p.stem[12:])
+    full_pkg = full_pkg[1]
     # 4. 依次解压
     click.echo(f'解压全量包: {full_pkg}')
     with py7zr.SevenZipFile(full_pkg, mode='r') as z:
