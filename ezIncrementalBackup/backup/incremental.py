@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from hashlib import md5
 from tqdm import tqdm
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from ..utils import is_excluded_path
 
 def file_md5(path):
@@ -12,6 +13,15 @@ def file_md5(path):
         for chunk in iter(lambda: f.read(4096), b""):
             hash_md5.update(chunk)
     return hash_md5.hexdigest()
+
+def get_file_info(path):
+    p = Path(path)
+    stat = p.stat()
+    return str(p), {
+        'mtime': stat.st_mtime,
+        'size': stat.st_size,
+        'md5': file_md5(p)
+    }
 
 def load_snapshot(snapshot_path):
     if not Path(snapshot_path).exists():
@@ -34,37 +44,35 @@ def incremental_backup(source_dir, snapshot_path, exclude_dirs=None):
     changed_files = []
     current_paths = set()
     exclude_dirs = set(exclude_dirs) if exclude_dirs else set()
-    # 统计总文件数
-    total_files = 0
+    # 先收集所有文件路径
+    all_files = []
     for root, dirs, files in os.walk(source):
         rel_root = os.path.relpath(root, source).replace("\\", "/")
         dirs[:] = [d for d in dirs if not is_excluded_path((rel_root + "/" + d).lstrip("/"), exclude_dirs)]
-        total_files += len(files)
-    with tqdm(total=total_files, desc='增量快照', unit='file') as pbar:
-        for root, dirs, files in os.walk(source):
-            rel_root = os.path.relpath(root, source).replace("\\", "/")
-            dirs[:] = [d for d in dirs if not is_excluded_path((rel_root + "/" + d).lstrip("/"), exclude_dirs)]
-            for file in files:
-                rel_file = (rel_root + "/" + file).lstrip("/")
-                if is_excluded_path(rel_file, exclude_dirs):
-                    continue
-                src_file = Path(root) / file
-                file_stat = src_file.stat()
-                file_hash = file_md5(src_file)
-                file_info = {
-                    'mtime': file_stat.st_mtime,
-                    'size': file_stat.st_size,
-                    'md5': file_hash
-                }
-                new_snapshot[str(src_file)] = file_info
-                prev_info = prev_snapshot.get(str(src_file))
-                if prev_info != file_info:
-                    changed_files.append(str(src_file))
-                current_paths.add(str(src_file))
+        for file in files:
+            rel_file = (rel_root + "/" + file).lstrip("/")
+            if is_excluded_path(rel_file, exclude_dirs):
+                continue
+            all_files.append(str(Path(root) / file))
+    # 多进程并发计算 stat+md5
+    with tqdm(total=len(all_files), desc='增量快照', unit='file') as pbar:
+        with ProcessPoolExecutor() as executor:
+            future_to_path = {executor.submit(get_file_info, f): f for f in all_files}
+            for future in as_completed(future_to_path):
+                path, info = future.result()
+                new_snapshot[path] = info
+                prev_info = prev_snapshot.get(path)
+                if prev_info != info:
+                    changed_files.append(path)
+                current_paths.add(path)
                 pbar.update(1)
-            for d in dirs:
-                dir_path = str(Path(root) / d)
-                current_paths.add(dir_path)
+    # 统计当前所有目录
+    for root, dirs, files in os.walk(source):
+        rel_root = os.path.relpath(root, source).replace("\\", "/")
+        dirs[:] = [d for d in dirs if not is_excluded_path((rel_root + "/" + d).lstrip("/"), exclude_dirs)]
+        for d in dirs:
+            dir_path = str(Path(root) / d)
+            current_paths.add(dir_path)
     # 检查被删除的文件和目录
     deleted_files = []
     deleted_dirs = []
