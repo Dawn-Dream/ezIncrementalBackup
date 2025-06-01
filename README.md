@@ -28,6 +28,11 @@ python setup.py sdist bdist_wheel
 pip install dist/ezIncrementalBackup-0.1.0-py3-none-any.whl
 ```
 
+或者直接从pypi仓库安装：
+```bash
+pip install ezIncrementalBackup
+```
+
 ## 配置
 请参考 `config.yaml`，填写源目录、目标、压缩、分卷等参数。
 
