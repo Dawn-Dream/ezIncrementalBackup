@@ -14,7 +14,12 @@ def file_md5(path):
             hash_md5.update(chunk)
     return hash_md5.hexdigest()
 
-def get_file_info(path):
+def get_file_stat(path):
+    p = Path(path)
+    stat = p.stat()
+    return str(p), stat.st_mtime, stat.st_size
+
+def get_file_info_with_md5(path):
     p = Path(path)
     stat = p.stat()
     return str(p), {
@@ -35,9 +40,7 @@ def save_snapshot(snapshot_path, data):
 
 def incremental_backup(source_dir, snapshot_path, exclude_dirs=None, workers=None):
     """
-    执行增量备份，只返回有变化的文件和被删除的文件/目录列表。
-    exclude_dirs: 需要排除的目录名列表（只排除一级目录名）
-    workers: 并发进程数，None=自动
+    优化：先用 size/mtime 粗筛，只有变化的文件才算 md5。
     """
     source = Path(source_dir)
     prev_snapshot = load_snapshot(snapshot_path)
@@ -55,32 +58,37 @@ def incremental_backup(source_dir, snapshot_path, exclude_dirs=None, workers=Non
             if is_excluded_path(rel_file, exclude_dirs):
                 continue
             all_files.append(str(Path(root) / file))
-    # 多进程并发计算 stat+md5
-    try:
-        with tqdm(total=len(all_files), desc='增量快照', unit='file') as pbar:
-            with ProcessPoolExecutor(max_workers=workers) as executor:
-                future_to_path = {executor.submit(get_file_info, f): f for f in all_files}
-                for future in as_completed(future_to_path):
-                    try:
-                        path, info = future.result()
-                        new_snapshot[path] = info
-                        prev_info = prev_snapshot.get(path)
-                        if prev_info != info:
-                            changed_files.append(path)
-                        current_paths.add(path)
-                        pbar.update(1)
-                    except Exception as e:
-                        pbar.close()
-                        executor.shutdown(cancel_futures=True, wait=False)
-                        raise e
-    except KeyboardInterrupt:
-        print("\n用户中断，正在优雅终止所有子进程...")
-        try:
-            executor.shutdown(cancel_futures=True, wait=False)
-        except Exception:
-            pass
-        pbar.close()
-        raise SystemExit("已终止备份任务。")
+    # 第一步：多进程收集 stat
+    stat_map = {}
+    with tqdm(total=len(all_files), desc='初筛', unit='file') as pbar:
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            future_to_path = {executor.submit(get_file_stat, f): f for f in all_files}
+            for future in as_completed(future_to_path):
+                path, mtime, size = future.result()
+                stat_map[path] = (mtime, size)
+                pbar.update(1)
+    # 第二步：筛选出需要算 md5 的文件
+    need_md5 = []
+    for path, (mtime, size) in stat_map.items():
+        prev_info = prev_snapshot.get(path)
+        if prev_info and prev_info.get('mtime') == mtime and prev_info.get('size') == size:
+            # 直接复用快照
+            new_snapshot[path] = prev_info
+            current_paths.add(path)
+        else:
+            need_md5.append(path)
+    # 第三步：多进程算 md5
+    with tqdm(total=len(need_md5), desc='MD5校验', unit='file') as pbar:
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            future_to_path = {executor.submit(get_file_info_with_md5, f): f for f in need_md5}
+            for future in as_completed(future_to_path):
+                path, info = future.result()
+                new_snapshot[path] = info
+                prev_info = prev_snapshot.get(path)
+                if prev_info != info:
+                    changed_files.append(path)
+                current_paths.add(path)
+                pbar.update(1)
     # 统计当前所有目录
     for root, dirs, files in os.walk(source):
         rel_root = os.path.relpath(root, source).replace("\\", "/")
