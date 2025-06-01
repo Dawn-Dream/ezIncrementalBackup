@@ -307,12 +307,51 @@ def restore_all(snapshot_file, target_dir, to_source):
     full_pkg = full_pkg[1]
     # 4. 依次解压
     click.echo(f'解压全量包: {full_pkg}')
-    with py7zr.SevenZipFile(full_pkg, mode='r') as z:
-        z.extractall(path=str(target_dir))
-    for pkg in incr_pkgs:
-        click.echo(f'解压增量包: {pkg}')
-        with py7zr.SevenZipFile(pkg, mode='r') as z:
-            z.extractall(path=str(target_dir))
+    # 优先用 7z 命令行解压分卷包
+    def try_7z_extract(pkg, target_dir):
+        import shutil
+        import subprocess
+        pkg = str(pkg)
+        target_dir = str(target_dir)
+        try:
+            result = subprocess.run([
+                '7z', 'x', pkg, f'-o{target_dir}', '-y'
+            ], check=True)
+            return True
+        except Exception as e:
+            click.echo(f'7z 命令行解压失败: {e}')
+            return False
+    extracted = False
+    if str(full_pkg).endswith('.7z.001') or str(full_pkg).endswith('.7z'):
+        # 检查所有分卷是否存在（仅分卷包）
+        if str(full_pkg).endswith('.7z.001'):
+            idx = 1
+            while True:
+                part_file = full_pkg.with_suffix(full_pkg.suffix[:-4] + f'.{idx:03d}')
+                if not part_file.exists():
+                    break
+                idx += 1
+        # 优先尝试 7z 命令行
+        if shutil.which('7z'):
+            click.echo('7z 命令行解压中，请关注终端输出进度...')
+            extracted = try_7z_extract(full_pkg, target_dir)
+        if not extracted:
+            import py7zr
+            from tqdm import tqdm
+            try:
+                with py7zr.SevenZipFile(full_pkg, mode='r') as z:
+                    all_names = z.getnames()
+                    with tqdm(total=len(all_names), desc='解压进度', unit='file') as pbar:
+                        def progress_callback(filename):
+                            pbar.update(1)
+                        z.extractall(path=str(target_dir), callback=progress_callback)
+                extracted = True
+            except Exception as e:
+                click.echo(f'py7zr 解压失败: {e}')
+                return
+    else:
+        click.echo('不支持的包类型，请选择 .7z 或 .7z.001 文件')
+        return
     # 5. 还原快照
     shutil.copy2(snapshot_file, SNAPSHOT_PATH)
     click.echo(f'已恢复快照: {snapshot_file} -> {SNAPSHOT_PATH}')
