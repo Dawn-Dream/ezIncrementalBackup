@@ -53,6 +53,17 @@ def config_manage():
                     newval = questionary.text(f"{key}.{subkey} [{config[key][subkey]}]:").ask()
                     if newval:
                         config[key][subkey] = newval
+            elif isinstance(config[key], list):
+                print(f"当前 {key}: {config[key]}")
+                if questionary.confirm(f"编辑 {key} 列表吗？").ask():
+                    new_list = []
+                    while True:
+                        item = questionary.text(f"添加到 {key}（留空结束）:").ask()
+                        if not item:
+                            break
+                        new_list.append(item)
+                    if new_list:
+                        config[key] = new_list
             else:
                 newval = questionary.text(f"{key} [{config[key]}]:").ask()
                 if newval:

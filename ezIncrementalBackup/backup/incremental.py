@@ -21,16 +21,20 @@ def save_snapshot(snapshot_path, data):
     with open(snapshot_path, 'w') as f:
         json.dump(data, f, indent=2)
 
-def incremental_backup(source_dir, snapshot_path):
+def incremental_backup(source_dir, snapshot_path, exclude_dirs=None):
     """
     执行增量备份，只返回有变化的文件和被删除的文件/目录列表。
+    exclude_dirs: 需要排除的目录名列表（只排除一级目录名）
     """
     source = Path(source_dir)
     prev_snapshot = load_snapshot(snapshot_path)
     new_snapshot = {}
     changed_files = []
     current_paths = set()
+    exclude_dirs = set(exclude_dirs) if exclude_dirs else set()
     for root, dirs, files in os.walk(source):
+        # 跳过排除目录
+        dirs[:] = [d for d in dirs if d not in exclude_dirs]
         for file in files:
             src_file = Path(root) / file
             file_stat = src_file.stat()
