@@ -1,5 +1,7 @@
 backup_type: incremental
 compress: true
+exclude_dirs:
+- data
 schedule: 0 2 * * *
 source_dir: ./test
 split_size_mb: 1024

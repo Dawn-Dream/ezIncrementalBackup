@@ -42,6 +42,10 @@ target:
   url: https://webdav.example.com/backup  # WebDAV地址
   username: user
   password: pass
+exclude_dirs:
+  - .git
+  - node_modules
+  - __pycache__
 schedule: "0 2 * * *"     # cron表达式，凌晨2点自动备份
 ```
 

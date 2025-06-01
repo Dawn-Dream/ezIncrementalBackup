@@ -29,7 +29,7 @@ def init():
     """初始化配置文件"""
     if not Path(CONFIG_PATH).exists():
         with open(CONFIG_PATH, 'w') as f:
-            f.write("""source_dir: /path/to/source\nbackup_type: incremental  # full or incremental\ncompress: true\nsplit_size_mb: 1024\ntarget:\n  type: local\n  path: /path/to/backup\n  url: https://webdav.example.com/backup\n  username: user\n  password: pass\nschedule: '0 2 * * *'\n""")
+            f.write("""source_dir: /path/to/source\nbackup_type: incremental  # full or incremental\ncompress: true\nsplit_size_mb: 1024\ntarget:\n  type: local\n  path: /path/to/backup\n  url: https://webdav.example.com/backup\n  username: user\n  password: pass\nexclude_dirs:\n  - .git\n  - node_modules\n  - __pycache__\nschedule: '0 2 * * *'\n""")
         click.echo("已生成默认配置文件 config.yaml")
     else:
         click.echo("config.yaml 已存在")
@@ -48,6 +48,7 @@ def backup(type, compress, split_size):
     compress_flag = compress if compress is not None else config.get('compress', True)
     split_size_mb = split_size or config.get('split_size_mb', 1024)
     target = config['target']
+    exclude_dirs = set(config.get('exclude_dirs', []))
     target_dir = target.get('path', './backup_output')
     Path(target_dir).mkdir(parents=True, exist_ok=True)
     Path('snapshot').mkdir(exist_ok=True)
@@ -64,6 +65,8 @@ def backup(type, compress, split_size):
             # 获取所有文件列表
             all_files = []
             for root, dirs, files in os.walk(source_dir):
+                # 跳过排除目录
+                dirs[:] = [d for d in dirs if d not in exclude_dirs]
                 for file in files:
                     all_files.append(str(Path(root) / file))
             archive_path = Path(target_dir) / f'full_{now_str}.7z'
@@ -76,6 +79,8 @@ def backup(type, compress, split_size):
         # 全量备份后生成快照
         snapshot = {}
         for root, dirs, files in os.walk(source_dir):
+            # 跳过排除目录
+            dirs[:] = [d for d in dirs if d not in exclude_dirs]
             for file in files:
                 src_file = Path(root) / file
                 file_stat = src_file.stat()
@@ -92,7 +97,7 @@ def backup(type, compress, split_size):
             json.dump(snapshot, f, indent=2)
     else:
         click.echo('执行增量备份...')
-        changed, deleted = incremental_backup(source_dir, SNAPSHOT_PATH)
+        changed, deleted = incremental_backup(source_dir, SNAPSHOT_PATH, exclude_dirs=exclude_dirs)
         click.echo(f'本次增量备份变动文件数: {len(changed)}，删除文件数: {len(deleted)}')
         files_to_pack = changed.copy()
         deleted_list_arcname = None
