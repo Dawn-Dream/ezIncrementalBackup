@@ -276,7 +276,7 @@ def restore_all(snapshot_file, target_dir, to_source):
         target_dir = Path(target_dir) if target_dir else Path('.')
     # 3. 找到全量包和所有相关增量包
     backup_dir = Path('test-bk') if Path('test-bk').exists() else Path('.')
-    all_pkgs = sorted(backup_dir.glob('*.7z'))
+    all_pkgs = sorted(list(backup_dir.glob('*.7z')) + list(backup_dir.glob('*.7z.001')))
     full_pkg = None
     incr_pkgs = []
     for pkg in all_pkgs:
