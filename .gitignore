@@ -1,9 +1,12 @@
 /test
 /data
 /backup/__pycache__
-/.cursor
 /snapshot
 /test-bk
 /dist
 /build
 *.egg-info/
+ezIncrementalBackup/__pycache__/cli.cpython-311.pyc
+ezIncrementalBackup/backup/__pycache__/full.cpython-311.pyc
+ezIncrementalBackup/backup/__pycache__/incremental.cpython-311.pyc
+*.pyc

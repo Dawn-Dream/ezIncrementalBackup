@@ -11,9 +11,20 @@ import tempfile
 import json
 import sys
 import subprocess
+from tqdm import tqdm
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 CONFIG_PATH = 'config.yaml'
 SNAPSHOT_PATH = 'snapshot/last_snapshot.json'
+
+def get_file_info(path):
+    p = Path(path)
+    stat = p.stat()
+    return path, {
+        'mtime': stat.st_mtime,
+        'size': stat.st_size,
+        'md5': file_md5(p)
+    }
 
 @click.group()
 def cli():
@@ -78,19 +89,19 @@ def backup(type, compress, split_size):
             parts = [str(p) for p in Path(target_dir).glob('*') if p.is_file()]
         # 全量备份后生成快照
         snapshot = {}
+        # 统计所有文件路径
+        all_files = []
         for root, dirs, files in os.walk(source_dir):
-            # 跳过排除目录
             dirs[:] = [d for d in dirs if d not in exclude_dirs]
             for file in files:
-                src_file = Path(root) / file
-                file_stat = src_file.stat()
-                file_hash = file_md5(src_file)
-                file_info = {
-                    'mtime': file_stat.st_mtime,
-                    'size': file_stat.st_size,
-                    'md5': file_hash
-                }
-                snapshot[str(src_file)] = file_info
+                all_files.append(str(Path(root) / file))
+        with tqdm(total=len(all_files), desc='生成快照', unit='file') as pbar:
+            with ProcessPoolExecutor() as executor:
+                future_to_path = {executor.submit(get_file_info, f): f for f in all_files}
+                for future in as_completed(future_to_path):
+                    path, info = future.result()
+                    snapshot[path] = info
+                    pbar.update(1)
         with open(SNAPSHOT_PATH, 'w', encoding='utf-8') as f:
             json.dump(snapshot, f, indent=2)
         with open(snapshot_history_path, 'w', encoding='utf-8') as f:
@@ -98,16 +109,26 @@ def backup(type, compress, split_size):
     else:
         click.echo('执行增量备份...')
         changed, deleted = incremental_backup(source_dir, SNAPSHOT_PATH, exclude_dirs=exclude_dirs)
-        click.echo(f'本次增量备份变动文件数: {len(changed)}，删除文件数: {len(deleted)}')
         files_to_pack = changed.copy()
         deleted_list_arcname = None
+        valid_deleted = []
         if deleted:
             deleted_list_arcname = f'deleted_{now_str}.txt'
             deleted_list_path = Path(source_dir) / deleted_list_arcname
             with open(deleted_list_path, 'w', encoding='utf-8') as f:
                 for path in deleted:
-                    f.write(path + '\n')
+                    try:
+                        rel_path = os.path.relpath(path, source_dir)
+                    except ValueError:
+                        continue  # 跳过非法路径
+                    if rel_path in ('.', '', '..') or rel_path.startswith('..'):
+                        continue
+                    f.write(rel_path + '\n')
+                    valid_deleted.append(path)
             files_to_pack.append(str(deleted_list_path))
+        else:
+            valid_deleted = []
+        click.echo(f'本次增量备份变动文件数: {len(changed)}，删除文件数: {len(valid_deleted)}')
         if compress_flag and files_to_pack:
             click.echo('压缩本次变动文件和删除清单并分卷...')
             archive_path = Path(target_dir) / f'incremental_{now_str}.7z'

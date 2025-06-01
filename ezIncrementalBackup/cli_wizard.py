@@ -128,11 +128,12 @@ def package_browse():
 
 def delete_apply():
     del_dir = Path(".")
-    dels = sorted(del_dir.glob("deleted_*.txt"))
+    # 递归查找所有 deleted_*.txt
+    dels = sorted(del_dir.rglob("deleted_*.txt"))
     if not dels:
         print("未找到删除清单文件！")
         return
-    dfile = questionary.select("请选择要应用的删除清单：", choices=[str(d.name) for d in dels]).ask()
+    dfile = questionary.select("请选择要应用的删除清单：", choices=[str(d) for d in dels]).ask()
     if dfile:
         print(f"正在应用删除清单: {dfile} ...")
         subprocess.run([sys.executable, "-m", "ezIncrementalBackup.cli", "apply-delete", dfile], check=True)
