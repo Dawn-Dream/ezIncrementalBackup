@@ -1,9 +1,10 @@
 name: Build Python Package
 
 on:
-  push:
-    branches: [ main ]
   pull_request:
+    types: [closed]
+    branches: [ main ]
+    
 
 jobs:
   build:
@@ -32,7 +33,7 @@ jobs:
         with:
           name: ezIncrementalBackup-dist
           path: dist/
-
+      
       - name: Publish to PyPI
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event.pull_request.merged == true
         uses: pypa/gh-action-pypi-publish@release/v1 
