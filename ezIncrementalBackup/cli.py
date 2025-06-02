@@ -108,6 +108,7 @@ def backup(type, compress, split_size, workers):
             click.echo('直接压缩源目录并分卷...')
             # 获取所有文件列表
             all_files = []
+            arcname_map = {}
             for root, dirs, files in os.walk(source_dir):
                 rel_root = os.path.relpath(root, source_dir).replace("\\", "/")
                 dirs[:] = [d for d in dirs if not is_excluded_path((rel_root + "/" + d).lstrip("/"), exclude_dirs)]
@@ -115,13 +116,15 @@ def backup(type, compress, split_size, workers):
                     rel_file = (rel_root + "/" + file).lstrip("/")
                     if is_excluded_path(rel_file, exclude_dirs):
                         continue
-                    all_files.append(str(Path(root) / file))
+                    abs_path = str(Path(root) / file)
+                    all_files.append(abs_path)
+                    arcname_map[abs_path] = rel_file
             for snap_file in SNAPSHOT_DIR.glob('*.json'):
-                all_files.append(str(snap_file))
-            # 计算base_dir
-            base_dir = get_common_parent(all_files)
+                abs_path = str(snap_file)
+                all_files.append(abs_path)
+                arcname_map[abs_path] = f'snapshot/{snap_file.name}'
             archive_path = Path(target_dir) / f'full_{now_str}.7z'
-            parts = compress_files_with_split(all_files, archive_path, split_size_mb, base_dir=base_dir)
+            parts = compress_files_with_split(all_files, archive_path, split_size_mb, base_dir=source_dir, arcname_map=arcname_map)
             click.echo(f'生成分卷: {parts}')
         else:
             click.echo('未启用压缩，直接复制源文件到目标目录...')
@@ -180,12 +183,16 @@ def backup(type, compress, split_size, workers):
         if compress_flag and files_to_pack:
             click.echo('压缩本次变动文件和删除清单并分卷...')
             # 加入快照目录下所有 .json 文件
+            arcname_map = {}
             for snap_file in SNAPSHOT_DIR.glob('*.json'):
-                files_to_pack.append(str(snap_file))
-            # 计算base_dir
-            base_dir = get_common_parent(files_to_pack)
+                abs_path = str(snap_file)
+                files_to_pack.append(abs_path)
+                arcname_map[abs_path] = f'snapshot/{snap_file.name}'
+            for i, f in enumerate(files_to_pack):
+                if f not in arcname_map:
+                    arcname_map[f] = os.path.relpath(f, source_dir)
             archive_path = Path(target_dir) / f'incremental_{now_str}.7z'
-            parts = compress_files_with_split(files_to_pack, archive_path, split_size_mb, base_dir=base_dir)
+            parts = compress_files_with_split(files_to_pack, archive_path, split_size_mb, base_dir=source_dir, arcname_map=arcname_map)
             click.echo(f'生成分卷: {parts}')
         elif files_to_pack:
             parts = files_to_pack

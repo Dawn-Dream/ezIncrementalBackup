@@ -54,9 +54,10 @@ def compress_with_split(source_dir, archive_path, split_size_mb=1024):
         else:
             return [str(archive)]
 
-def compress_files_with_split(file_list, archive_path, split_size_mb=1024, base_dir=None):
+def compress_files_with_split(file_list, archive_path, split_size_mb=1024, base_dir=None, arcname_map=None):
     """
     压缩指定文件列表，优先用7z命令行，否则用py7zr。file_list为文件路径列表，base_dir为相对路径基准目录。
+    arcname_map: {绝对路径: 包内路径}
     """
     archive = Path(archive_path)
     split_size = f"-v{split_size_mb}m"
@@ -64,8 +65,8 @@ def compress_files_with_split(file_list, archive_path, split_size_mb=1024, base_
         filelist_path = archive.parent / "_filelist.txt"
         with open(filelist_path, 'w', encoding='utf-8') as f:
             for file_path in file_list:
-                rel_path = os.path.relpath(file_path, base_dir) if base_dir else file_path
-                f.write(f"{rel_path}\n")
+                arcname = arcname_map[file_path] if arcname_map and file_path in arcname_map else (os.path.relpath(file_path, base_dir) if base_dir else file_path)
+                f.write(f"{arcname}\n")
         cmd = [
             "7z", "a", "-t7z", "-m0=lzma2", "-mx=3", "-mmt=on", split_size,
             str(archive), f"@{filelist_path}", "-spf2"
@@ -85,7 +86,7 @@ def compress_files_with_split(file_list, archive_path, split_size_mb=1024, base_
         with py7zr.SevenZipFile(archive, 'w', filters=[{'id': py7zr.FILTER_LZMA2}]) as archive_file:
             for file_path in tqdm(file_list, desc='压缩进度', unit='file'):
                 file_path = Path(file_path)
-                arcname = os.path.relpath(file_path, base_dir) if base_dir else file_path.name
+                arcname = arcname_map[str(file_path)] if arcname_map and str(file_path) in arcname_map else (os.path.relpath(file_path, base_dir) if base_dir else file_path.name)
                 archive_file.write(str(file_path), arcname=arcname)
         file_size = archive.stat().st_size
         if file_size > split_size_bytes:

@@ -177,12 +177,23 @@ def package_browse():
     elif action == "查看包内容":
         print(f"正在查看包内容: {pkg_path}")
         try:
-            import py7zr
-            with py7zr.SevenZipFile(str(pkg_path), mode='r') as z:
-                print("\n包内容：")
-                for name in z.getnames():
-                    print(name)
-                print("")
+            # 分卷包优先用7z命令行
+            if str(pkg_path).endswith('.7z.001') or any(pkg_path.name.endswith(f'.7z.{i:03d}') for i in range(1, 1000)):
+                import shutil
+                if shutil.which('7z'):
+                    import subprocess
+                    print("[7z] 正在列出分卷包内容...")
+                    result = subprocess.run(['7z', 'l', str(pkg_path)], capture_output=True, text=True)
+                    print(result.stdout)
+                else:
+                    print("分卷包内容浏览仅支持7z命令行，请用命令行 7z l 包名 查看！")
+            else:
+                import py7zr
+                with py7zr.SevenZipFile(str(pkg_path), mode='r') as z:
+                    print("\n包内容：")
+                    for name in z.getnames():
+                        print(name)
+                    print("")
         except FileNotFoundError:
             print(f"文件未找到: {pkg_path}")
         except Exception as e:
