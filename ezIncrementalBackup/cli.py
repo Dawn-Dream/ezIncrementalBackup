@@ -180,24 +180,22 @@ def backup(type, compress, split_size, workers):
         if SNAPSHOT_PATH.exists():
             import shutil
             shutil.copy2(SNAPSHOT_PATH, snapshot_history_path)
-        # 打包前加入所有快照文件
-        arcname_map = {}
-        # 先处理变动文件的路径映射
-        for f in files_to_pack:
-            if f not in arcname_map:
-                try:
-                    arcname_map[f] = os.path.relpath(f, source_dir)
-                except ValueError:
-                    continue  # 跳过非法路径
-        # 再处理快照文件的路径映射
+        # 先生成待打包文件列表（变动文件、删除清单、快照）
+        files_to_pack = changed.copy()
+        if deleted:
+            files_to_pack.append(str(deleted_list_path))
         for snap_file in SNAPSHOT_DIR.glob('*.json'):
-            abs_path = str(snap_file)
-            files_to_pack.append(abs_path)
-            # 使用相对于目标目录的路径，而不是源目录
-            arcname_map[abs_path] = os.path.relpath(snap_file, target_dir)
-        # 过滤掉不存在的文件，防止7z报错
+            files_to_pack.append(str(snap_file))
+        # 只保留实际存在的文件
         files_to_pack = [f for f in files_to_pack if Path(f).exists() and Path(f).is_file()]
-        arcname_map = {k: v for k, v in arcname_map.items() if v != '' and not v.endswith('/')}
+        # 只为 files_to_pack 里的文件生成 arcname_map
+        arcname_map = {}
+        for f in files_to_pack:
+            p = Path(f)
+            if p.parent == SNAPSHOT_DIR:
+                arcname_map[f] = os.path.relpath(f, target_dir)
+            else:
+                arcname_map[f] = os.path.relpath(f, source_dir)
         print('【调试】最终files_to_pack:', files_to_pack)
         print('【调试】最终arcname_map:', arcname_map)
         if compress_flag and files_to_pack:
