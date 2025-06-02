@@ -188,7 +188,8 @@ def backup(type, compress, split_size, workers):
         if deleted:
             files_to_pack.append(str(deleted_list_path))
         files_to_pack += snapshot_files
-        files_to_pack = list({f for f in files_to_pack if Path(f).exists() and Path(f).is_file()})
+        # 只保留实际存在的文件
+        files_to_pack = [f for f in files_to_pack if Path(f).exists() and Path(f).is_file()]
         # 只为 files_to_pack 里的文件生成 arcname_map
         arcname_map = {}
         for f in files_to_pack:
@@ -197,6 +198,8 @@ def backup(type, compress, split_size, workers):
                 arcname_map[f] = os.path.relpath(f, target_dir)
             else:
                 arcname_map[f] = os.path.relpath(f, source_dir)
+        # 再次严格过滤 arcname_map
+        arcname_map = {k: v for k, v in arcname_map.items() if Path(k).exists() and Path(k).is_file()}
         # 压缩前再次严格过滤
         files_to_pack = [f for f in files_to_pack if Path(f).exists() and Path(f).is_file()]
         arcname_map = {k: v for k, v in arcname_map.items() if Path(k).exists() and Path(k).is_file()}
@@ -204,55 +207,14 @@ def backup(type, compress, split_size, workers):
             click.echo('压缩本次变动文件和删除清单并分卷...')
             archive_path = Path(target_dir) / f'incremental_{now_str}.7z'
             parts = compress_files_with_split(files_to_pack, archive_path, split_size_mb, base_dir=None, arcname_map=arcname_map)
+            if not parts:
+                click.echo('压缩失败，终止备份流程。')
+                return
             click.echo(f'生成分卷: {parts}')
         elif files_to_pack:
             parts = files_to_pack
         else:
             parts = []
-        # 删除临时快照目录
-        import shutil
-
-        # 1. 复制快照文件到临时目录
-        temp_snap_dir = Path(target_dir) / '_temp_snapshots'
-        if temp_snap_dir.exists():
-            shutil.rmtree(temp_snap_dir)
-        temp_snap_dir.mkdir(parents=True, exist_ok=True)
-        snapshot_files = []
-        for f in SNAPSHOT_DIR.glob('*.json'):
-            if f.is_file():
-                dst = temp_snap_dir / f.name
-                shutil.copy2(f, dst)
-                snapshot_files.append(str(dst))
-
-        # 2. files_to_pack 只用 temp_snap_dir 下的文件
-        files_to_pack = changed.copy()
-        if deleted:
-            files_to_pack.append(str(deleted_list_path))
-        files_to_pack += snapshot_files
-        files_to_pack = [f for f in files_to_pack if Path(f).exists() and Path(f).is_file()]
-
-        # 3. arcname_map
-        arcname_map = {}
-        for f in files_to_pack:
-            p = Path(f)
-            if p.parent == temp_snap_dir:
-                arcname_map[f] = f'snapshot/{p.name}'
-            else:
-                arcname_map[f] = os.path.relpath(f, source_dir)
-
-        # 4. 压缩
-        if compress_flag and files_to_pack:
-            click.echo('压缩本次变动文件和删除清单并分卷...')
-            archive_path = Path(target_dir) / f'incremental_{now_str}.7z'
-            parts = compress_files_with_split(files_to_pack, archive_path, split_size_mb, base_dir=None, arcname_map=arcname_map)
-            click.echo(f'生成分卷: {parts}')
-        elif files_to_pack:
-            parts = files_to_pack
-        else:
-            parts = []
-
-        # 5. 删除临时快照目录
-        shutil.rmtree(temp_snap_dir, ignore_errors=True)
         # 删除临时删除清单文件
         if deleted_list_arcname:
             del_path = Path(source_dir) / deleted_list_arcname
