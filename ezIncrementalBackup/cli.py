@@ -180,13 +180,13 @@ def backup(type, compress, split_size, workers):
         if SNAPSHOT_PATH.exists():
             import shutil
             shutil.copy2(SNAPSHOT_PATH, snapshot_history_path)
-        # 先生成待打包文件列表（变动文件、删除清单、快照）
+        # 重新扫描 snapshot 目录，收集所有实际存在的快照文件
+        snapshot_files = [str(f) for f in SNAPSHOT_DIR.glob('*.json') if f.is_file()]
+        # 组装 files_to_pack
         files_to_pack = changed.copy()
         if deleted:
             files_to_pack.append(str(deleted_list_path))
-        for snap_file in SNAPSHOT_DIR.glob('*.json'):
-            files_to_pack.append(str(snap_file))
-        # 去重并只保留实际存在的文件
+        files_to_pack += snapshot_files
         files_to_pack = list({f for f in files_to_pack if Path(f).exists() and Path(f).is_file()})
         # 只为 files_to_pack 里的文件生成 arcname_map
         arcname_map = {}
@@ -196,8 +196,6 @@ def backup(type, compress, split_size, workers):
                 arcname_map[f] = os.path.relpath(f, target_dir)
             else:
                 arcname_map[f] = os.path.relpath(f, source_dir)
-        print('【调试】最终files_to_pack:', files_to_pack)
-        print('【调试】最终arcname_map:', arcname_map)
         if compress_flag and files_to_pack:
             click.echo('压缩本次变动文件和删除清单并分卷...')
             archive_path = Path(target_dir) / f'incremental_{now_str}.7z'
@@ -268,6 +266,9 @@ def restore(archive, target_dir):
     if snapshot_dir.exists():
         for f in snapshot_dir.glob('*.json'):
             f.unlink()
+        # 如果 snapshot 目录为空，删除它
+        if not any(snapshot_dir.iterdir()):
+            snapshot_dir.rmdir()
     click.echo("恢复完成！")
 
 @cli.command()
@@ -335,7 +336,7 @@ def restore_all(snapshot_file, target_dir, to_source):
     import yaml
     # 1. 解析快照时间戳
     snap_name = Path(snapshot_file).stem
-    m = re.match(r'snapshot_(\d{8}_\d{6})', snap_name)
+    m = re.match(r'snapshot(?:_full)?_(\d{8}_\d{6})', snap_name)
     if not m:
         click.echo('快照文件名格式不正确！')
         return
@@ -438,14 +439,23 @@ def restore_all(snapshot_file, target_dir, to_source):
         click.echo('不支持的包类型，请选择 .7z 或 .7z.001 文件')
         return
     # 5. 还原快照
-    shutil.copy2(snapshot_file, SNAPSHOT_PATH)
-    click.echo(f'已恢复快照: {snapshot_file} -> {SNAPSHOT_PATH}')
+    with open('config.yaml', 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    target_dir2 = Path(config['target'].get('path', './backup_output'))
+    snapshot_dir2 = target_dir2 / 'snapshot'
+    snapshot_dir2.mkdir(parents=True, exist_ok=True)
+    SNAPSHOT_PATH2 = snapshot_dir2 / 'last_snapshot.json'
+    shutil.copy2(snapshot_file, SNAPSHOT_PATH2)
+    click.echo(f'已恢复快照: {snapshot_file} -> {SNAPSHOT_PATH2}')
     click.echo('一键还原完成！')
     # 解压后，删除 snapshot 目录下的 .json 文件
     snapshot_dir = (target_dir / 'snapshot')
     if snapshot_dir.exists():
         for f in snapshot_dir.glob('*.json'):
             f.unlink()
+        # 如果 snapshot 目录为空，删除它
+        if not any(snapshot_dir.iterdir()):
+            snapshot_dir.rmdir()
 
 @cli.command()
 @click.argument('deleted_list', type=click.Path(exists=True))
