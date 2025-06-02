@@ -190,7 +190,9 @@ def backup(type, compress, split_size, workers):
             if f not in arcname_map:
                 arcname_map[f] = os.path.relpath(f, source_dir)
         # 过滤掉不存在的文件，防止7z报错
-        files_to_pack = [f for f in files_to_pack if Path(f).exists()]
+        files_to_pack = [f for f in files_to_pack if Path(f).exists() and Path(f).is_file()]
+        # 过滤掉arcname为snapshot的项
+        arcname_map = {k: v for k, v in arcname_map.items() if v != 'snapshot'}
         if compress_flag and files_to_pack:
             click.echo('压缩本次变动文件和删除清单并分卷...')
             archive_path = Path(target_dir) / f'incremental_{now_str}.7z'
