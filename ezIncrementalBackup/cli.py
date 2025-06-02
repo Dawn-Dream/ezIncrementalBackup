@@ -82,7 +82,6 @@ def backup(type, compress, split_size, workers):
     target_dir = target.get('path', './backup_output')
     workers = workers or config.get('workers', None)
     Path(target_dir).mkdir(parents=True, exist_ok=True)
-    Path('snapshot').mkdir(exist_ok=True)
 
     # 获取快照目录
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
@@ -273,8 +272,14 @@ def config():
 @cli.command()
 def show_snapshot():
     """显示快照信息"""
-    if Path(SNAPSHOT_PATH).exists():
-        with open(SNAPSHOT_PATH, 'r') as f:
+    # 始终使用目标备份目录下的 snapshot
+    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    target_dir = Path(config['target'].get('path', './backup_output'))
+    snapshot_dir = target_dir / 'snapshot'
+    snapshot_path = snapshot_dir / 'last_snapshot.json'
+    if snapshot_path.exists():
+        with open(snapshot_path, 'r') as f:
             click.echo(f.read())
     else:
         click.echo('暂无快照信息')
@@ -515,7 +520,10 @@ def clean_source():
 def delete_snapshot(snapshot_file, delete_all):
     """删除指定快照文件或全部快照（不需要确认）"""
     from pathlib import Path
-    snap_dir = Path('snapshot')
+    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    target_dir = Path(config['target'].get('path', './backup_output'))
+    snap_dir = target_dir / 'snapshot'
     if delete_all:
         snaps = list(snap_dir.glob('snapshot_*.json'))
         if not snaps:
