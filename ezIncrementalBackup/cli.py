@@ -176,17 +176,24 @@ def backup(type, compress, split_size, workers):
         else:
             valid_deleted = []
         click.echo(f'本次增量备份变动文件数: {len(changed)}，删除文件数: {len(valid_deleted)}')
+        # 先生成快照副本
+        snapshot_history_path = SNAPSHOT_DIR / f'snapshot_{now_str}.json'
+        if SNAPSHOT_PATH.exists():
+            import shutil
+            shutil.copy2(SNAPSHOT_PATH, snapshot_history_path)
+        # 打包前加入所有快照文件
+        arcname_map = {}
+        for snap_file in SNAPSHOT_DIR.glob('*.json'):
+            abs_path = str(snap_file)
+            files_to_pack.append(abs_path)
+            arcname_map[abs_path] = f'snapshot/{snap_file.name}'
+        for i, f in enumerate(files_to_pack):
+            if f not in arcname_map:
+                arcname_map[f] = os.path.relpath(f, source_dir)
+        # 过滤掉不存在的文件，防止7z报错
+        files_to_pack = [f for f in files_to_pack if Path(f).exists()]
         if compress_flag and files_to_pack:
             click.echo('压缩本次变动文件和删除清单并分卷...')
-            # 加入快照目录下所有 .json 文件
-            arcname_map = {}
-            for snap_file in SNAPSHOT_DIR.glob('*.json'):
-                abs_path = str(snap_file)
-                files_to_pack.append(abs_path)
-                arcname_map[abs_path] = f'snapshot/{snap_file.name}'
-            for i, f in enumerate(files_to_pack):
-                if f not in arcname_map:
-                    arcname_map[f] = os.path.relpath(f, source_dir)
             archive_path = Path(target_dir) / f'incremental_{now_str}.7z'
             parts = compress_files_with_split(files_to_pack, archive_path, split_size_mb, base_dir=source_dir, arcname_map=arcname_map)
             click.echo(f'生成分卷: {parts}')
@@ -199,11 +206,6 @@ def backup(type, compress, split_size, workers):
             del_path = Path(source_dir) / deleted_list_arcname
             if del_path.exists():
                 os.remove(del_path)
-        snapshot_history_path = SNAPSHOT_DIR / f'snapshot_{now_str}.json'
-        # 备份完成后保存快照副本
-        if SNAPSHOT_PATH.exists():
-            import shutil
-            shutil.copy2(SNAPSHOT_PATH, snapshot_history_path)
 
     # WebDAV上传
     if target['type'] == 'webdav':
