@@ -94,6 +94,10 @@ def backup(type, compress, split_size, workers):
 
     # 备份
     now_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    # 计算所有待打包文件的最近公共父目录
+    def get_common_parent(paths):
+        from os.path import commonpath
+        return Path(commonpath(paths))
     if backup_type == 'full' or (backup_type == 'incremental' and not SNAPSHOT_PATH.exists()):
         if backup_type == 'incremental':
             click.echo('未检测到快照，自动切换为全量备份...')
@@ -111,11 +115,12 @@ def backup(type, compress, split_size, workers):
                     if is_excluded_path(rel_file, exclude_dirs):
                         continue
                     all_files.append(str(Path(root) / file))
-            # 加入快照目录下所有 .json 文件
             for snap_file in SNAPSHOT_DIR.glob('*.json'):
                 all_files.append(str(snap_file))
+            # 计算base_dir
+            base_dir = get_common_parent(all_files)
             archive_path = Path(target_dir) / f'full_{now_str}.7z'
-            parts = compress_files_with_split(all_files, archive_path, split_size_mb, base_dir=target_dir.parent)
+            parts = compress_files_with_split(all_files, archive_path, split_size_mb, base_dir=base_dir)
             click.echo(f'生成分卷: {parts}')
         else:
             click.echo('未启用压缩，直接复制源文件到目标目录...')
@@ -176,8 +181,10 @@ def backup(type, compress, split_size, workers):
             # 加入快照目录下所有 .json 文件
             for snap_file in SNAPSHOT_DIR.glob('*.json'):
                 files_to_pack.append(str(snap_file))
+            # 计算base_dir
+            base_dir = get_common_parent(files_to_pack)
             archive_path = Path(target_dir) / f'incremental_{now_str}.7z'
-            parts = compress_files_with_split(files_to_pack, archive_path, split_size_mb, base_dir=target_dir.parent)
+            parts = compress_files_with_split(files_to_pack, archive_path, split_size_mb, base_dir=base_dir)
             click.echo(f'生成分卷: {parts}')
         elif files_to_pack:
             parts = files_to_pack
