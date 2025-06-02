@@ -104,6 +104,29 @@ def backup(type, compress, split_size, workers):
             click.echo('未检测到快照，自动切换为全量备份...')
         click.echo('执行全量备份...')
         snapshot_history_path = SNAPSHOT_DIR / f'snapshot_full_{now_str}.json'
+        # 先统计所有文件路径，生成快照
+        snapshot = {}
+        all_files_for_snapshot = []
+        for root, dirs, files in os.walk(source_dir):
+            rel_root = os.path.relpath(root, source_dir).replace("\\", "/")
+            dirs[:] = [d for d in dirs if not is_excluded_path((rel_root + "/" + d).lstrip("/"), exclude_dirs)]
+            for file in files:
+                rel_file = (rel_root + "/" + file).lstrip("/")
+                if is_excluded_path(rel_file, exclude_dirs):
+                    continue
+                all_files_for_snapshot.append(str(Path(root) / file))
+        with tqdm(total=len(all_files_for_snapshot), desc='生成快照', unit='file') as pbar:
+            with ProcessPoolExecutor() as executor:
+                future_to_path = {executor.submit(get_file_info, f): f for f in all_files_for_snapshot}
+                for future in as_completed(future_to_path):
+                    path, info = future.result()
+                    snapshot[path] = info
+                    pbar.update(1)
+        with open(SNAPSHOT_PATH, 'w', encoding='utf-8') as f:
+            json.dump(snapshot, f, indent=2)
+        with open(snapshot_history_path, 'w', encoding='utf-8') as f:
+            json.dump(snapshot, f, indent=2)
+        # 备份完成后保存快照副本（已在上面）
         if compress_flag:
             click.echo('直接压缩源目录并分卷...')
             # 获取所有文件列表
@@ -130,33 +153,6 @@ def backup(type, compress, split_size, workers):
             click.echo('未启用压缩，直接复制源文件到目标目录...')
             full_backup(source_dir, target_dir, exclude_dirs=exclude_dirs)
             parts = [str(p) for p in Path(target_dir).glob('*') if p.is_file()]
-        # 全量备份后生成快照
-        snapshot = {}
-        # 统计所有文件路径
-        all_files = []
-        for root, dirs, files in os.walk(source_dir):
-            rel_root = os.path.relpath(root, source_dir).replace("\\", "/")
-            dirs[:] = [d for d in dirs if not is_excluded_path((rel_root + "/" + d).lstrip("/"), exclude_dirs)]
-            for file in files:
-                rel_file = (rel_root + "/" + file).lstrip("/")
-                if is_excluded_path(rel_file, exclude_dirs):
-                    continue
-                all_files.append(str(Path(root) / file))
-        with tqdm(total=len(all_files), desc='生成快照', unit='file') as pbar:
-            with ProcessPoolExecutor() as executor:
-                future_to_path = {executor.submit(get_file_info, f): f for f in all_files}
-                for future in as_completed(future_to_path):
-                    path, info = future.result()
-                    snapshot[path] = info
-                    pbar.update(1)
-        with open(SNAPSHOT_PATH, 'w', encoding='utf-8') as f:
-            json.dump(snapshot, f, indent=2)
-        with open(snapshot_history_path, 'w', encoding='utf-8') as f:
-            json.dump(snapshot, f, indent=2)
-        # 备份完成后保存快照副本
-        if SNAPSHOT_PATH.exists():
-            import shutil
-            shutil.copy2(SNAPSHOT_PATH, snapshot_history_path)
     else:
         click.echo('执行增量备份...')
         changed, deleted = incremental_backup(source_dir, SNAPSHOT_PATH, exclude_dirs=exclude_dirs, workers=workers)
