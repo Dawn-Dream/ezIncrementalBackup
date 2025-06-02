@@ -65,7 +65,12 @@ def compress_files_with_split(file_list, archive_path, split_size_mb=1024, base_
         filelist_path = archive.parent / "_filelist.txt"
         with open(filelist_path, 'w', encoding='utf-8') as f:
             for file_path in file_list:
+                # 只允许文件，且arcname不能为snapshot目录本身
+                if not Path(file_path).is_file():
+                    continue
                 arcname = arcname_map[file_path] if arcname_map and file_path in arcname_map else (os.path.relpath(file_path, base_dir) if base_dir else file_path)
+                if arcname == 'snapshot':
+                    continue
                 f.write(f"{arcname}\n")
         cmd = [
             "7z", "a", "-t7z", "-m0=lzma2", "-mx=3", "-mmt=on", split_size,
