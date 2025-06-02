@@ -105,15 +105,17 @@ def backup(type, compress, split_size, workers):
             all_files = []
             for root, dirs, files in os.walk(source_dir):
                 rel_root = os.path.relpath(root, source_dir).replace("\\", "/")
-                # 递归过滤目录
                 dirs[:] = [d for d in dirs if not is_excluded_path((rel_root + "/" + d).lstrip("/"), exclude_dirs)]
                 for file in files:
                     rel_file = (rel_root + "/" + file).lstrip("/")
                     if is_excluded_path(rel_file, exclude_dirs):
                         continue
                     all_files.append(str(Path(root) / file))
+            # 加入快照目录下所有 .json 文件
+            for snap_file in SNAPSHOT_DIR.glob('*.json'):
+                all_files.append(str(snap_file))
             archive_path = Path(target_dir) / f'full_{now_str}.7z'
-            parts = compress_files_with_split(all_files, archive_path, split_size_mb, base_dir=source_dir)
+            parts = compress_files_with_split(all_files, archive_path, split_size_mb, base_dir=target_dir.parent)
             click.echo(f'生成分卷: {parts}')
         else:
             click.echo('未启用压缩，直接复制源文件到目标目录...')
@@ -125,7 +127,6 @@ def backup(type, compress, split_size, workers):
         all_files = []
         for root, dirs, files in os.walk(source_dir):
             rel_root = os.path.relpath(root, source_dir).replace("\\", "/")
-            # 递归过滤目录
             dirs[:] = [d for d in dirs if not is_excluded_path((rel_root + "/" + d).lstrip("/"), exclude_dirs)]
             for file in files:
                 rel_file = (rel_root + "/" + file).lstrip("/")
@@ -172,8 +173,11 @@ def backup(type, compress, split_size, workers):
         click.echo(f'本次增量备份变动文件数: {len(changed)}，删除文件数: {len(valid_deleted)}')
         if compress_flag and files_to_pack:
             click.echo('压缩本次变动文件和删除清单并分卷...')
+            # 加入快照目录下所有 .json 文件
+            for snap_file in SNAPSHOT_DIR.glob('*.json'):
+                files_to_pack.append(str(snap_file))
             archive_path = Path(target_dir) / f'incremental_{now_str}.7z'
-            parts = compress_files_with_split(files_to_pack, archive_path, split_size_mb, base_dir=source_dir)
+            parts = compress_files_with_split(files_to_pack, archive_path, split_size_mb, base_dir=target_dir.parent)
             click.echo(f'生成分卷: {parts}')
         elif files_to_pack:
             parts = files_to_pack
@@ -240,6 +244,11 @@ def restore(archive, target_dir):
                         click.echo(f"已删除: {abs_path}")
                     except Exception as e:
                         click.echo(f"删除失败: {abs_path}，原因: {e}")
+    # 解压后，删除 snapshot 目录下的 .json 文件
+    snapshot_dir = (extract_dir / 'snapshot')
+    if snapshot_dir.exists():
+        for f in snapshot_dir.glob('*.json'):
+            f.unlink()
     click.echo("恢复完成！")
 
 @cli.command()
@@ -276,6 +285,15 @@ def upload():
 def restore_snapshot(snapshot_file):
     """恢复快照文件为当前快照基准"""
     import shutil
+    import yaml
+    from pathlib import Path
+    # 动态获取 SNAPSHOT_PATH
+    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    target_dir = Path(config['target'].get('path', './backup_output'))
+    snapshot_dir = target_dir / 'snapshot'
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    SNAPSHOT_PATH = snapshot_dir / 'last_snapshot.json'
     shutil.copy2(snapshot_file, SNAPSHOT_PATH)
     click.echo(f'已恢复快照: {snapshot_file} -> {SNAPSHOT_PATH}')
 
@@ -398,6 +416,11 @@ def restore_all(snapshot_file, target_dir, to_source):
     shutil.copy2(snapshot_file, SNAPSHOT_PATH)
     click.echo(f'已恢复快照: {snapshot_file} -> {SNAPSHOT_PATH}')
     click.echo('一键还原完成！')
+    # 解压后，删除 snapshot 目录下的 .json 文件
+    snapshot_dir = (target_dir / 'snapshot')
+    if snapshot_dir.exists():
+        for f in snapshot_dir.glob('*.json'):
+            f.unlink()
 
 @cli.command()
 @click.argument('deleted_list', type=click.Path(exists=True))
