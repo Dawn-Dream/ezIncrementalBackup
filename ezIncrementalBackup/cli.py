@@ -96,8 +96,9 @@ def backup(type, compress, split_size, workers):
     now_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     # 计算所有待打包文件的最近公共父目录
     def get_common_parent(paths):
-        from os.path import commonpath
-        return Path(commonpath(paths))
+        from os.path import commonpath, abspath
+        abs_paths = [os.path.abspath(p) for p in paths]
+        return Path(commonpath(abs_paths))
     if backup_type == 'full' or (backup_type == 'incremental' and not SNAPSHOT_PATH.exists()):
         if backup_type == 'incremental':
             click.echo('未检测到快照，自动切换为全量备份...')
