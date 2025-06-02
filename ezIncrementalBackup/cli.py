@@ -182,22 +182,28 @@ def backup(type, compress, split_size, workers):
             shutil.copy2(SNAPSHOT_PATH, snapshot_history_path)
         # 打包前加入所有快照文件
         arcname_map = {}
+        # 先处理变动文件的路径映射
+        for f in files_to_pack:
+            if f not in arcname_map:
+                try:
+                    arcname_map[f] = os.path.relpath(f, source_dir)
+                except ValueError:
+                    continue  # 跳过非法路径
+        # 再处理快照文件的路径映射
         for snap_file in SNAPSHOT_DIR.glob('*.json'):
             abs_path = str(snap_file)
             files_to_pack.append(abs_path)
-            arcname_map[abs_path] = f'snapshot/{snap_file.name}'
-        for i, f in enumerate(files_to_pack):
-            if f not in arcname_map:
-                arcname_map[f] = os.path.relpath(f, source_dir)
+            # 使用相对于目标目录的路径，而不是源目录
+            arcname_map[abs_path] = os.path.relpath(snap_file, target_dir)
         # 过滤掉不存在的文件，防止7z报错
-        files_to_pack = [f for f in files_to_pack if Path(f).exists() and Path(f).is_file() and Path(f).name != 'snapshot']
-        arcname_map = {k: v for k, v in arcname_map.items() if v != 'snapshot' and v != '' and not v.endswith('/')}
+        files_to_pack = [f for f in files_to_pack if Path(f).exists() and Path(f).is_file()]
+        arcname_map = {k: v for k, v in arcname_map.items() if v != '' and not v.endswith('/')}
         print('【调试】最终files_to_pack:', files_to_pack)
         print('【调试】最终arcname_map:', arcname_map)
         if compress_flag and files_to_pack:
             click.echo('压缩本次变动文件和删除清单并分卷...')
             archive_path = Path(target_dir) / f'incremental_{now_str}.7z'
-            parts = compress_files_with_split(files_to_pack, archive_path, split_size_mb, base_dir=source_dir, arcname_map=arcname_map)
+            parts = compress_files_with_split(files_to_pack, archive_path, split_size_mb, base_dir=None, arcname_map=arcname_map)
             click.echo(f'生成分卷: {parts}')
         elif files_to_pack:
             parts = files_to_pack
