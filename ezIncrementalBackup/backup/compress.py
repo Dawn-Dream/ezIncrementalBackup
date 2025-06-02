@@ -96,9 +96,14 @@ def compress_files_with_split(file_list, archive_path, split_size_mb=1024, base_
                 cmd.extend(["-i@" + str(listfile_path)])
             
             print(f"[7z] 正在压缩: {' '.join(cmd)}")
-            result = subprocess.run(cmd, cwd=base_dir if base_dir else None)
-            if result.returncode != 0:
-                raise RuntimeError("7z 压缩失败")
+            try:
+                result = subprocess.run(cmd, cwd=base_dir if base_dir else None)
+                if result.returncode != 0:
+                    print("7z 压缩失败，但程序不会退出。")
+                    return []
+            except Exception as e:
+                print(f'7z 压缩异常: {e}，程序不会退出。')
+                return []
             
             parts = sorted(archive.parent.glob(f"{archive.name}.part*"))
             if not parts:

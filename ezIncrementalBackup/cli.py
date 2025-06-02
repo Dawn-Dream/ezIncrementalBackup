@@ -196,6 +196,9 @@ def backup(type, compress, split_size, workers):
                 arcname_map[f] = os.path.relpath(f, target_dir)
             else:
                 arcname_map[f] = os.path.relpath(f, source_dir)
+        # 压缩前再次严格过滤
+        files_to_pack = [f for f in files_to_pack if Path(f).exists() and Path(f).is_file()]
+        arcname_map = {k: v for k, v in arcname_map.items() if Path(k).exists() and Path(k).is_file()}
         if compress_flag and files_to_pack:
             click.echo('压缩本次变动文件和删除清单并分卷...')
             archive_path = Path(target_dir) / f'incremental_{now_str}.7z'
