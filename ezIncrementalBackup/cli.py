@@ -186,8 +186,8 @@ def backup(type, compress, split_size, workers):
             files_to_pack.append(str(deleted_list_path))
         for snap_file in SNAPSHOT_DIR.glob('*.json'):
             files_to_pack.append(str(snap_file))
-        # 只保留实际存在的文件
-        files_to_pack = [f for f in files_to_pack if Path(f).exists() and Path(f).is_file()]
+        # 去重并只保留实际存在的文件
+        files_to_pack = list({f for f in files_to_pack if Path(f).exists() and Path(f).is_file()})
         # 只为 files_to_pack 里的文件生成 arcname_map
         arcname_map = {}
         for f in files_to_pack:
