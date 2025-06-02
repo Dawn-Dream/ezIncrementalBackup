@@ -63,14 +63,20 @@ def compress_files_with_split(file_list, archive_path, split_size_mb=1024, base_
     split_size = f"-v{split_size_mb}m"
     if is_7z_available():
         filelist_path = archive.parent / "_filelist.txt"
+        debug_lines = []
         with open(filelist_path, 'w', encoding='utf-8') as f:
             for file_path in file_list:
-                # 只允许文件，且arcname不能为snapshot目录本身
                 if not Path(file_path).is_file():
                     continue
                 arcname = arcname_map[file_path] if arcname_map and file_path in arcname_map else (os.path.relpath(file_path, base_dir) if base_dir else file_path)
-                if arcname == 'snapshot':
-                    continue
+                debug_lines.append(f"file_path={file_path}, arcname={arcname}")
+                # arcname不能为snapshot或空，且必须带/
+                if arcname == 'snapshot' or arcname == '' or arcname.endswith('/') or arcname == '.' or arcname == './':
+                    print('【致命错误】arcname非法:', arcname)
+                    print('\n'.join(debug_lines))
+                    with open(filelist_path, 'r', encoding='utf-8') as ff:
+                        print('filelist内容:', ff.read())
+                    raise RuntimeError(f"filelist.txt中出现非法arcname: {arcname}")
                 f.write(f"{arcname}\n")
         cmd = [
             "7z", "a", "-t7z", "-m0=lzma2", "-mx=3", "-mmt=on", split_size,
