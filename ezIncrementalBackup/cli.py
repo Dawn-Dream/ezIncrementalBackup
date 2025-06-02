@@ -18,7 +18,8 @@ import py7zr
 from .utils import is_excluded_path
 
 CONFIG_PATH = 'config.yaml'
-SNAPSHOT_PATH = 'snapshot/last_snapshot.json'
+SNAPSHOT_DIR = None
+SNAPSHOT_PATH = None
 
 def get_file_info(path):
     p = Path(path)
@@ -83,13 +84,21 @@ def backup(type, compress, split_size, workers):
     Path(target_dir).mkdir(parents=True, exist_ok=True)
     Path('snapshot').mkdir(exist_ok=True)
 
+    # 获取快照目录
+    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    target_dir = Path(config['target'].get('path', './backup_output'))
+    SNAPSHOT_DIR = target_dir / 'snapshot'
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    SNAPSHOT_PATH = SNAPSHOT_DIR / 'last_snapshot.json'
+
     # 备份
     now_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    snapshot_history_path = Path('snapshot') / f'snapshot_{now_str}.json'
-    if backup_type == 'full' or (backup_type == 'incremental' and not Path(SNAPSHOT_PATH).exists()):
+    if backup_type == 'full' or (backup_type == 'incremental' and not SNAPSHOT_PATH.exists()):
         if backup_type == 'incremental':
             click.echo('未检测到快照，自动切换为全量备份...')
         click.echo('执行全量备份...')
+        snapshot_history_path = SNAPSHOT_DIR / f'snapshot_full_{now_str}.json'
         if compress_flag:
             click.echo('直接压缩源目录并分卷...')
             # 获取所有文件列表
@@ -134,6 +143,10 @@ def backup(type, compress, split_size, workers):
             json.dump(snapshot, f, indent=2)
         with open(snapshot_history_path, 'w', encoding='utf-8') as f:
             json.dump(snapshot, f, indent=2)
+        # 备份完成后保存快照副本
+        if SNAPSHOT_PATH.exists():
+            import shutil
+            shutil.copy2(SNAPSHOT_PATH, snapshot_history_path)
     else:
         click.echo('执行增量备份...')
         changed, deleted = incremental_backup(source_dir, SNAPSHOT_PATH, exclude_dirs=exclude_dirs, workers=workers)
@@ -171,6 +184,11 @@ def backup(type, compress, split_size, workers):
             del_path = Path(source_dir) / deleted_list_arcname
             if del_path.exists():
                 os.remove(del_path)
+        snapshot_history_path = SNAPSHOT_DIR / f'snapshot_{now_str}.json'
+        # 备份完成后保存快照副本
+        if SNAPSHOT_PATH.exists():
+            import shutil
+            shutil.copy2(SNAPSHOT_PATH, snapshot_history_path)
 
     # WebDAV上传
     if target['type'] == 'webdav':
@@ -179,11 +197,6 @@ def backup(type, compress, split_size, workers):
         click.echo('WebDAV上传完成')
     else:
         click.echo('备份已保存到本地')
-
-    # 备份完成后保存快照副本
-    if Path(SNAPSHOT_PATH).exists():
-        import shutil
-        shutil.copy2(SNAPSHOT_PATH, snapshot_history_path)
 
 @cli.command()
 @click.argument('archive', type=click.Path(exists=True))
@@ -459,6 +472,39 @@ def clean_source():
         click.echo(f"已清空目录: {source_dir}")
     else:
         click.echo(f"源目录不存在: {source_dir}，无需清空")
+
+@cli.command()
+@click.argument('snapshot_file', type=click.Path(exists=False), required=False)
+@click.option('--all', 'delete_all', is_flag=True, default=False, help='删除所有快照')
+def delete_snapshot(snapshot_file, delete_all):
+    """删除指定快照文件或全部快照（不需要确认）"""
+    from pathlib import Path
+    snap_dir = Path('snapshot')
+    if delete_all:
+        snaps = list(snap_dir.glob('snapshot_*.json'))
+        if not snaps:
+            click.echo('未找到快照文件，无需删除。')
+            return
+        for snap in snaps:
+            try:
+                snap.unlink()
+                click.echo(f'已删除快照: {snap}')
+            except Exception as e:
+                click.echo(f'删除失败: {snap}，原因: {e}')
+        click.echo('所有快照已删除。')
+    else:
+        if not snapshot_file:
+            click.echo('请指定要删除的快照文件名，或使用 --all 删除全部快照。')
+            return
+        snap_path = snap_dir / snapshot_file
+        if not snap_path.exists():
+            click.echo(f'未找到快照文件: {snap_path}')
+            return
+        try:
+            snap_path.unlink()
+            click.echo(f'已删除快照: {snap_path}')
+        except Exception as e:
+            click.echo(f'删除失败: {snap_path}，原因: {e}')
 
 if '--gui' in sys.argv:
     sys.argv.remove('--gui')

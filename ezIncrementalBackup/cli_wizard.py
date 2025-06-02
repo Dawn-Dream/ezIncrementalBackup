@@ -4,6 +4,7 @@ import yaml
 import subprocess
 import os
 import sys
+import re
 
 def main_menu():
     while True:
@@ -12,6 +13,7 @@ def main_menu():
             choices=[
                 "配置管理",
                 "快照还原",
+                "快照删除",
                 "包浏览",
                 "删除清单应用",
                 "全量备份",
@@ -24,6 +26,8 @@ def main_menu():
             config_manage()
         elif choice == "快照还原":
             snapshot_restore()
+        elif choice == "快照删除":
+            snapshot_delete_wizard()
         elif choice == "包浏览":
             package_browse()
         elif choice == "删除清单应用":
@@ -72,17 +76,66 @@ def config_manage():
             yaml.dump(config, f, allow_unicode=True)
         print("已保存新配置！")
 
+def get_snapshot_dir():
+    with open('config.yaml', 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    target_dir = Path(config['target'].get('path', './backup_output'))
+    snap_dir = target_dir / 'snapshot'
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    return snap_dir
+
 def snapshot_restore():
-    snap_dir = Path("snapshot")
-    snaps = sorted(snap_dir.glob("snapshot_*.json")) if snap_dir.exists() else []
+    snap_dir = get_snapshot_dir()
+    snaps = sorted({s.name for s in snap_dir.glob("*.json")}) if snap_dir.exists() else []
     if not snaps:
         print("未找到快照文件！")
         return
-    snap = questionary.select("请选择要还原的快照：", choices=[str(s.name) for s in snaps]).ask()
+    choices = snaps + ["返回主菜单"]
+    snap = questionary.select("请选择要还原的快照：", choices=choices).ask()
+    if snap == "返回主菜单":
+        return
     if snap:
         print(f"正在还原快照: {snap} ...")
-        subprocess.run([sys.executable, "-m", "ezIncrementalBackup.cli", "restore-all", f"snapshot/{snap}", "--to-source"], check=True)
+        subprocess.run([sys.executable, "-m", "ezIncrementalBackup.cli", "restore-all", str(get_snapshot_dir() / snap), "--to-source"], check=True)
         print("还原完成！")
+
+def snapshot_delete_wizard():
+    snap_dir = get_snapshot_dir()
+    backup_dir = snap_dir.parent
+    snaps = sorted({s.name for s in snap_dir.glob("*.json")}) if snap_dir.exists() else []
+    if not snaps:
+        print("未找到快照文件！")
+        return
+    choices = snaps + ["全部删除", "返回主菜单"]
+    snap = questionary.select("请选择要删除的快照：", choices=choices).ask()
+    if snap == "返回主菜单":
+        return
+    elif snap == "全部删除":
+        print("正在删除所有快照和相关备份包...")
+        # 删除所有快照
+        for s in snap_dir.glob("*.json"):
+            # 删除对应的包
+            ts = None
+            m = re.match(r"snapshot(?:_full)?_(\d{8}_\d{6})\.json", s.name)
+            if m:
+                ts = m.group(1)
+            if ts:
+                for pkg in backup_dir.glob(f"*_{ts}.7z*"):
+                    pkg.unlink()
+            s.unlink()
+        print("所有快照及相关包已删除！")
+    else:
+        print(f"正在删除快照: {snap} ...")
+        s = snap_dir / snap
+        ts = None
+        m = re.match(r"snapshot(?:_full)?_(\d{8}_\d{6})\.json", snap)
+        if m:
+            ts = m.group(1)
+        if ts:
+            for pkg in backup_dir.glob(f"*_{ts}.7z*"):
+                pkg.unlink()
+        s.unlink()
+        print("快照及相关包已删除！")
 
 def package_browse():
     # 自动读取配置文件里的 target.path
