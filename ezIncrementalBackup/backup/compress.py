@@ -76,19 +76,16 @@ def compress_files_with_split(file_list, archive_path, split_size_mb=1024, base_
                     abs_path = str(p.resolve())
                     f.write(f"{abs_path}\n")
             
-            # 2. 如果有 arcname_map，创建映射文件
-            listfile_path = None
-            if arcname_map:
-                listfile_path = temp_dir / "_listfile.txt"
-                with open(listfile_path, 'w', encoding='utf-8') as f:
-                    for file_path in file_list:
-                        p = Path(file_path)
-                        if not p.is_file():
-                            continue
-                        abs_path = str(p.resolve())
-                        if abs_path in arcname_map:
-                            # 7z listfile 格式：原始路径 = 目标路径
-                            f.write(f"{abs_path} = {arcname_map[abs_path]}\n")
+            # 2. 如果有 arcname_map，创建映射文件（只为存在的文件写入）
+            listfile_path = temp_dir / "_listfile.txt"
+            with open(listfile_path, 'w', encoding='utf-8') as f:
+                for file_path in file_list:
+                    p = Path(file_path)
+                    if not p.is_file():
+                        continue
+                    abs_path = str(p.resolve())
+                    if abs_path in arcname_map:
+                        f.write(f"{abs_path} = {arcname_map[abs_path]}\n")
             
             # 3. 构建命令
             cmd = [
