@@ -111,10 +111,10 @@ def snapshot_delete_wizard():
     if snap == "返回主菜单":
         return
     elif snap == "全部删除":
+        if not questionary.confirm("确定要删除所有快照及相关备份包吗？此操作不可恢复！").ask():
+            print("操作已取消。"); return
         print("正在删除所有快照和相关备份包...")
-        # 删除所有快照
         for s in snap_dir.glob("*.json"):
-            # 删除对应的包
             ts = None
             m = re.match(r"snapshot(?:_full)?_(\d{8}_\d{6})\.json", s.name)
             if m:
@@ -125,6 +125,8 @@ def snapshot_delete_wizard():
             s.unlink()
         print("所有快照及相关包已删除！")
     else:
+        if not questionary.confirm(f"确定要删除快照 {snap} 及相关备份包吗？此操作不可恢复！").ask():
+            print("操作已取消。"); return
         print(f"正在删除快照: {snap} ...")
         s = snap_dir / snap
         ts = None
