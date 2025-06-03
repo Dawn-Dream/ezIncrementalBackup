@@ -18,9 +18,11 @@ import py7zr
 from .utils import is_excluded_path
 
 CONFIG_PATH = 'config.yaml'
-SNAPSHOT_DIR = None
+
 SNAPSHOT_PATH = None
 
+# 1.0.0开始已固定，请不要修改
+# 否则会破坏快照文件的兼容性
 def get_file_info(path):
     p = Path(path)
     stat = p.stat()
@@ -100,20 +102,56 @@ def backup(type, compress, split_size, workers):
         snapshot_history_path = SNAPSHOT_DIR / f'snapshot_full_{now_str}.json'
         if compress_flag:
             click.echo('直接压缩源目录并分卷...')
-            # 获取所有文件列表
+            # === 先生成快照 ===
+            snapshot = {}
             all_files = []
             for root, dirs, files in os.walk(source_dir):
                 rel_root = os.path.relpath(root, source_dir).replace("\\", "/")
-                # 递归过滤目录
                 dirs[:] = [d for d in dirs if not is_excluded_path((rel_root + "/" + d).lstrip("/"), exclude_dirs)]
                 for file in files:
                     rel_file = (rel_root + "/" + file).lstrip("/")
                     if is_excluded_path(rel_file, exclude_dirs):
                         continue
                     all_files.append(str(Path(root) / file))
+            with tqdm(total=len(all_files), desc='生成快照', unit='file') as pbar:
+                with ProcessPoolExecutor() as executor:
+                    future_to_path = {executor.submit(get_file_info, f): f for f in all_files}
+                    for future in as_completed(future_to_path):
+                        path, info = future.result()
+                        snapshot[path] = info
+                        pbar.update(1)
+            with open(SNAPSHOT_PATH, 'w', encoding='utf-8') as f:
+                json.dump(snapshot, f, indent=2)
+            with open(snapshot_history_path, 'w', encoding='utf-8') as f:
+                json.dump(snapshot, f, indent=2)
+            if SNAPSHOT_PATH.exists():
+                import shutil
+                shutil.copy2(SNAPSHOT_PATH, snapshot_history_path)
+            # === 删除旧 .snapshot，再创建新 .snapshot ===
+            import shutil
+            src_snapshot = SNAPSHOT_DIR
+            dst_snapshot = Path(source_dir) / '.snapshot'
+            if dst_snapshot.exists():
+                shutil.rmtree(dst_snapshot)
+            prepare_limited_snapshot(src_snapshot, dst_snapshot)
+            # 重新获取所有文件列表，包含 .snapshot
+            all_files = []
+            for root, dirs, files in os.walk(source_dir):
+                rel_root = os.path.relpath(root, source_dir).replace("\\", "/")
+                dirs[:] = [d for d in dirs if not is_excluded_path((rel_root + "/" + d).lstrip("/"), exclude_dirs)]
+                for file in files:
+                    rel_file = (rel_root + "/" + file).lstrip("/")
+                    if is_excluded_path(rel_file, exclude_dirs):
+                        continue
+                    all_files.append(str(Path(root) / file))
+            if dst_snapshot.exists():
+                all_files += collect_all_files(dst_snapshot)
             archive_path = Path(target_dir) / f'full_{now_str}.7z'
             parts = compress_files_with_split(all_files, archive_path, split_size_mb, base_dir=source_dir)
             click.echo(f'生成分卷: {parts}')
+            # 删除临时 .snapshot 文件夹
+            if dst_snapshot.exists():
+                shutil.rmtree(dst_snapshot)
         else:
             click.echo('未启用压缩，直接复制源文件到目标目录...')
             full_backup(source_dir, target_dir, exclude_dirs=exclude_dirs)
@@ -148,6 +186,54 @@ def backup(type, compress, split_size, workers):
             shutil.copy2(SNAPSHOT_PATH, snapshot_history_path)
     else:
         click.echo('执行增量备份...')
+        # 工具函数：只复制主全量包、last_snapshot.json和最新7个增量快照到临时 .snapshot（严格去重，保证无重复文件）
+        def prepare_limited_snapshot(src_snapshot, dst_snapshot):
+            import shutil
+            from pathlib import Path
+            if dst_snapshot.exists():
+                shutil.rmtree(dst_snapshot)
+            dst_snapshot.mkdir(parents=True, exist_ok=True)
+            copied = set()
+            # 只复制根目录下的 last_snapshot.json
+            last_snap = src_snapshot / 'last_snapshot.json'
+            if last_snap.exists() and last_snap.is_file():
+                shutil.copy2(last_snap, dst_snapshot / 'last_snapshot.json')
+                copied.add('last_snapshot.json')
+            # 只复制根目录下的主全量包快照
+            for f in src_snapshot.glob('snapshot_full_*.json'):
+                if f.is_file():
+                    fname = f.name.lower()
+                    if fname not in copied:
+                        shutil.copy2(f, dst_snapshot / f.name)
+                        copied.add(fname)
+            # 只复制根目录下最新7个 snapshot_*.json
+            snaps = sorted([f for f in src_snapshot.glob('snapshot_*.json') if not f.name.startswith('snapshot_full_') and f.is_file()], key=lambda x: x.stat().st_mtime, reverse=True)
+            count = 0
+            for f in snaps:
+                fname = f.name.lower()
+                if fname not in copied:
+                    shutil.copy2(f, dst_snapshot / f.name)
+                    copied.add(fname)
+                    count += 1
+                if count >= 7:
+                    break
+
+        # 工具函数：递归收集目录下所有文件和子目录（不重复）
+        def collect_all_files(dir_path):
+            result = set()
+            for root, dirs, files in os.walk(dir_path):
+                for d in dirs:
+                    result.add(str(Path(root) / d))
+                for f in files:
+                    result.add(str(Path(root) / f))
+            result.add(str(dir_path))  # 目录本身也加进去
+            return list(result)
+
+        # === 增量备份流程修正 ===
+        import shutil
+        src_snapshot = SNAPSHOT_DIR
+        dst_snapshot = Path(source_dir) / '.snapshot'
+        # 1. 先执行 incremental_backup，生成最新快照
         changed, deleted = incremental_backup(source_dir, SNAPSHOT_PATH, exclude_dirs=exclude_dirs, workers=workers)
         files_to_pack = changed.copy()
         deleted_list_arcname = None
@@ -168,6 +254,13 @@ def backup(type, compress, split_size, workers):
             files_to_pack.append(str(deleted_list_path))
         else:
             valid_deleted = []
+        # 2. 删除旧 .snapshot，再创建新 .snapshot
+        if dst_snapshot.exists():
+            shutil.rmtree(dst_snapshot)
+        prepare_limited_snapshot(src_snapshot, dst_snapshot)
+        # 3. 递归加入 .snapshot 目录下所有内容（如果存在）
+        if dst_snapshot.exists():
+            files_to_pack += collect_all_files(dst_snapshot)
         click.echo(f'本次增量备份变动文件数: {len(changed)}，删除文件数: {len(valid_deleted)}')
         if compress_flag and files_to_pack:
             click.echo('压缩本次变动文件和删除清单并分卷...')
@@ -183,12 +276,15 @@ def backup(type, compress, split_size, workers):
             del_path = Path(source_dir) / deleted_list_arcname
             if del_path.exists():
                 os.remove(del_path)
+        # 4. 删除临时 .snapshot 文件夹
+        if dst_snapshot.exists():
+            shutil.rmtree(dst_snapshot)
         snapshot_history_path = SNAPSHOT_DIR / f'snapshot_{now_str}.json'
         # 备份完成后保存快照副本
         if SNAPSHOT_PATH.exists():
-            import shutil
             shutil.copy2(SNAPSHOT_PATH, snapshot_history_path)
-
+            
+    # 1.1.0开始已弃用
     # WebDAV上传
     if target['type'] == 'webdav':
         click.echo('上传到WebDAV...')
