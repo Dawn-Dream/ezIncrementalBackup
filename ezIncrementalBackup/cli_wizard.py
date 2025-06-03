@@ -11,14 +11,15 @@ def main_menu():
         choice = questionary.select(
             "请选择操作：",
             choices=[
-                "配置管理",
+                
                 "快照还原",
                 "快照删除",
                 "包浏览",
-                "删除清单应用",
+                #"删除清单应用",
                 "全量备份",
                 "增量备份",
-                "清空源目录",
+                #"清空源目录",
+                "配置管理",
                 "退出"
             ]
         ).ask()
@@ -30,14 +31,14 @@ def main_menu():
             snapshot_delete_wizard()
         elif choice == "包浏览":
             package_browse()
-        elif choice == "删除清单应用":
-            delete_apply()
+        # elif choice == "删除清单应用":
+        #     delete_apply()
         elif choice == "全量备份":
             backup("full")
         elif choice == "增量备份":
             backup("incremental")
-        elif choice == "清空源目录":
-            clean_source_wizard()
+        # elif choice == "清空源目录":
+        #     clean_source_wizard()
         elif choice == "退出":
             break
 
@@ -111,10 +112,27 @@ def snapshot_delete_wizard():
     if snap == "返回主菜单":
         return
     elif snap == "全部删除":
-        if not questionary.confirm("确定要删除所有快照及相关备份包吗？此操作不可恢复！").ask():
-            print("操作已取消。"); return
-        print("正在删除所有快照和相关备份包...")
+        # 显示所有将被删除的文件
+        print("\n将删除以下快照和相关备份包:")
         for s in snap_dir.glob("*.json"):
+            print(f"- 快照: {s.name}")
+            ts = None
+            m = re.match(r"snapshot(?:_full)?_(\d{8}_\d{6})\.json", s.name)
+            if m:
+                ts = m.group(1)
+                if ts:
+                    for pkg in backup_dir.glob(f"*_{ts}.7z*"):
+                        print(f"  - 备份包: {pkg.name}")
+        
+        # 确认删除
+        if not questionary.confirm("确认要删除以上所有文件吗?").ask():
+            print("已取消删除操作")
+            return
+            
+        print("正在删除所有快照和相关备份包...")
+        # 删除所有快照
+        for s in snap_dir.glob("*.json"):
+            # 删除对应的包
             ts = None
             m = re.match(r"snapshot(?:_full)?_(\d{8}_\d{6})\.json", s.name)
             if m:
@@ -125,14 +143,24 @@ def snapshot_delete_wizard():
             s.unlink()
         print("所有快照及相关包已删除！")
     else:
-        if not questionary.confirm(f"确定要删除快照 {snap} 及相关备份包吗？此操作不可恢复！").ask():
-            print("操作已取消。"); return
-        print(f"正在删除快照: {snap} ...")
+        # 显示将被删除的文件
+        print(f"\n将删除以下快照和相关备份包:")
+        print(f"- 快照: {snap}")
         s = snap_dir / snap
         ts = None
         m = re.match(r"snapshot(?:_full)?_(\d{8}_\d{6})\.json", snap)
         if m:
             ts = m.group(1)
+            if ts:
+                for pkg in backup_dir.glob(f"*_{ts}.7z*"):
+                    print(f"  - 备份包: {pkg.name}")
+        
+        # 确认删除
+        if not questionary.confirm("确认要删除以上文件吗?").ask():
+            print("已取消删除操作")
+            return
+            
+        print(f"正在删除快照: {snap} ...")
         if ts:
             for pkg in backup_dir.glob(f"*_{ts}.7z*"):
                 pkg.unlink()
@@ -177,23 +205,12 @@ def package_browse():
     elif action == "查看包内容":
         print(f"正在查看包内容: {pkg_path}")
         try:
-            # 分卷包优先用7z命令行
-            if str(pkg_path).endswith('.7z.001') or any(pkg_path.name.endswith(f'.7z.{i:03d}') for i in range(1, 1000)):
-                import shutil
-                if shutil.which('7z'):
-                    import subprocess
-                    print("[7z] 正在列出分卷包内容...")
-                    result = subprocess.run(['7z', 'l', str(pkg_path)], capture_output=True, text=True)
-                    print(result.stdout)
-                else:
-                    print("分卷包内容浏览仅支持7z命令行，请用命令行 7z l 包名 查看！")
-            else:
-                import py7zr
-                with py7zr.SevenZipFile(str(pkg_path), mode='r') as z:
-                    print("\n包内容：")
-                    for name in z.getnames():
-                        print(name)
-                    print("")
+            import py7zr
+            with py7zr.SevenZipFile(str(pkg_path), mode='r') as z:
+                print("\n包内容：")
+                for name in z.getnames():
+                    print(name)
+                print("")
         except FileNotFoundError:
             print(f"文件未找到: {pkg_path}")
         except Exception as e:
