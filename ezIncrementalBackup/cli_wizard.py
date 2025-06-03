@@ -15,10 +15,10 @@ def main_menu():
                 "快照还原",
                 "快照删除",
                 "包浏览",
-                "删除清单应用",
+                #"删除清单应用",
                 "全量备份",
                 "增量备份",
-                "清空源目录",
+                #"清空源目录",
                 "退出"
             ]
         ).ask()
@@ -30,14 +30,14 @@ def main_menu():
             snapshot_delete_wizard()
         elif choice == "包浏览":
             package_browse()
-        elif choice == "删除清单应用":
-            delete_apply()
+        # elif choice == "删除清单应用":
+        #     delete_apply()
         elif choice == "全量备份":
             backup("full")
         elif choice == "增量备份":
             backup("incremental")
-        elif choice == "清空源目录":
-            clean_source_wizard()
+        # elif choice == "清空源目录":
+        #     clean_source_wizard()
         elif choice == "退出":
             break
 
@@ -111,6 +111,23 @@ def snapshot_delete_wizard():
     if snap == "返回主菜单":
         return
     elif snap == "全部删除":
+        # 显示所有将被删除的文件
+        print("\n将删除以下快照和相关备份包:")
+        for s in snap_dir.glob("*.json"):
+            print(f"- 快照: {s.name}")
+            ts = None
+            m = re.match(r"snapshot(?:_full)?_(\d{8}_\d{6})\.json", s.name)
+            if m:
+                ts = m.group(1)
+                if ts:
+                    for pkg in backup_dir.glob(f"*_{ts}.7z*"):
+                        print(f"  - 备份包: {pkg.name}")
+        
+        # 确认删除
+        if not questionary.confirm("确认要删除以上所有文件吗?").ask():
+            print("已取消删除操作")
+            return
+            
         print("正在删除所有快照和相关备份包...")
         # 删除所有快照
         for s in snap_dir.glob("*.json"):
@@ -125,12 +142,24 @@ def snapshot_delete_wizard():
             s.unlink()
         print("所有快照及相关包已删除！")
     else:
-        print(f"正在删除快照: {snap} ...")
+        # 显示将被删除的文件
+        print(f"\n将删除以下快照和相关备份包:")
+        print(f"- 快照: {snap}")
         s = snap_dir / snap
         ts = None
         m = re.match(r"snapshot(?:_full)?_(\d{8}_\d{6})\.json", snap)
         if m:
             ts = m.group(1)
+            if ts:
+                for pkg in backup_dir.glob(f"*_{ts}.7z*"):
+                    print(f"  - 备份包: {pkg.name}")
+        
+        # 确认删除
+        if not questionary.confirm("确认要删除以上文件吗?").ask():
+            print("已取消删除操作")
+            return
+            
+        print(f"正在删除快照: {snap} ...")
         if ts:
             for pkg in backup_dir.glob(f"*_{ts}.7z*"):
                 pkg.unlink()
