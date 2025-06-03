@@ -11,7 +11,7 @@ def main_menu():
         choice = questionary.select(
             "请选择操作：",
             choices=[
-                "配置管理",
+                
                 "快照还原",
                 "快照删除",
                 "包浏览",
@@ -19,6 +19,7 @@ def main_menu():
                 "全量备份",
                 "增量备份",
                 #"清空源目录",
+                "配置管理",
                 "退出"
             ]
         ).ask()
