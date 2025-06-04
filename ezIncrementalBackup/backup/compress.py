@@ -56,23 +56,34 @@ def compress_with_split(source_dir, archive_path, split_size_mb=1024):
 
 def compress_files_with_split(file_list, archive_path, split_size_mb=1024, base_dir=None):
     """
-    压缩指定文件列表，优先用7z命令行，否则用py7zr。file_list为文件路径列表，base_dir为相对路径基准目录。
+    压缩指定文件列表，优先用7z命令行，否则用py7zr。
+    file_list: 需要压缩的文件路径列表
+    archive_path: 压缩包输出路径
+    split_size_mb: 分卷大小（单位MB），默认1024
+    base_dir: 相对路径基准目录，压缩包内文件路径以此为基准
     """
-    archive = Path(archive_path)
+    archive = Path(archive_path).resolve()
     split_size = f"-v{split_size_mb}m"
     if is_7z_available():
-        filelist_path = archive.parent / "_filelist.txt"
+        # 生成 filelist.txt 的绝对路径，避免 7z 找不到
+        filelist_path = (archive.parent / "_filelist.txt").resolve()
         with open(filelist_path, 'w', encoding='utf-8') as f:
             for file_path in file_list:
+                # 归一化为相对路径（以 base_dir 为基准），7z 支持 / 分隔符
                 rel_path = os.path.relpath(file_path, base_dir) if base_dir else file_path
-                f.write(f"{rel_path}\n")
+                f.write(f"{Path(rel_path).as_posix()}\n")
+        # 7z 命令用 filelist.txt 的绝对路径，防止找不到
         cmd = [
             "7z", "a", "-t7z", "-m0=lzma2", "-mx=3", "-mmt=on", split_size,
-            str(archive), f"@{filelist_path}", "-spf2"
+            str(archive), f"@{filelist_path.as_posix()}", "-spf2"
         ]
         print(f"[7z] 正在压缩: {' '.join(cmd)}")
-        result = subprocess.run(cmd, cwd=base_dir if base_dir else None)  # 直接输出到终端
-        filelist_path.unlink(missing_ok=True)
+        # 7z 的 cwd 可以为 base_dir，也可以不设（只要 filelist.txt 路径是绝对的）
+        result = subprocess.run(cmd, cwd=base_dir if base_dir else None)
+        try:
+            filelist_path.unlink()
+        except Exception:
+            pass
         if result.returncode != 0:
             raise RuntimeError("7z 压缩失败")
         parts = sorted(archive.parent.glob(f"{archive.name}.part*"))

@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from .backup.full import full_backup
 from .backup.incremental import incremental_backup, file_md5
-from .backup.compress import compress_with_split, compress_files_with_split
+from .backup.compress import compress_files_with_split
 from .backup.webdav import upload_to_webdav
 import datetime
 import tempfile
@@ -18,7 +18,11 @@ import py7zr
 from .utils import is_excluded_path
 
 CONFIG_PATH = 'config.yaml'
-SNAPSHOT_PATH = 'snapshot/last_snapshot.json'
+
+# 快照文件路径
+SNAPSHOT_PATH = None
+# 快照文件夹路径
+SNAPSHOT_DIR = None
 
 def get_file_info(path):
     p = Path(path)
@@ -72,59 +76,43 @@ def backup(type, compress, split_size, workers):
     # 读取配置
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
-    source_dir = config['source_dir']
-    backup_type = type or config.get('backup_type', 'incremental')
-    compress_flag = compress if compress is not None else config.get('compress', True)
-    split_size_mb = split_size or config.get('split_size_mb', 1024)
-    target = config['target']
-    exclude_dirs = set(config.get('exclude_dirs', []))
-    target_dir = target.get('path', './backup_output')
-    workers = workers or config.get('workers', None)
-    Path(target_dir).mkdir(parents=True, exist_ok=True)
-    Path('snapshot').mkdir(exist_ok=True)
+    source_dir = config['source_dir'] # 源目录
+    backup_type = type or config.get('backup_type', 'incremental') # 备份类型
+    compress_flag = compress if compress is not None else config.get('compress', True) # 是否压缩
+    split_size_mb = split_size or config.get('split_size_mb', 1024) # 分卷大小
+    target = config['target'] # 备份目标
+    exclude_dirs = set(config.get('exclude_dirs', [])) # 排除目录
+    target_dir = target.get('path', './backup_output') # 备份目标目录
+    workers = workers or config.get('workers', None) # 并发进程数
 
-    # 备份
+    Path(target_dir).mkdir(parents=True, exist_ok=True) # 创建备份目标目录
+    SNAPSHOT_DIR = Path(target_dir) / 'snapshot'
+    SNAPSHOT_DIR.mkdir(exist_ok=True) # 创建目标目录内的快照文件夹
+    SNAPSHOT_PATH = str(SNAPSHOT_DIR / 'last_snapshot.json') # 快照文件路径
+
+    # 生成快照文件名
     now_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    snapshot_history_path = Path('snapshot') / f'snapshot_{now_str}.json'
+    snapshot_history_path = Path(SNAPSHOT_DIR) / f'snapshot_{now_str}.json'
+
+    # 检测是否存在全量包
     if backup_type == 'full' or (backup_type == 'incremental' and not Path(SNAPSHOT_PATH).exists()):
         if backup_type == 'incremental':
             click.echo('未检测到快照，自动切换为全量备份...')
         click.echo('执行全量备份...')
-        if compress_flag:
-            click.echo('直接压缩源目录并分卷...')
-            # 获取所有文件列表
-            all_files = []
-            for root, dirs, files in os.walk(source_dir):
-                rel_root = os.path.relpath(root, source_dir).replace("\\", "/")
-                # 递归过滤目录
-                dirs[:] = [d for d in dirs if not is_excluded_path((rel_root + "/" + d).lstrip("/"), exclude_dirs)]
-                for file in files:
-                    rel_file = (rel_root + "/" + file).lstrip("/")
-                    if is_excluded_path(rel_file, exclude_dirs):
-                        continue
-                    all_files.append(str(Path(root) / file))
-            archive_path = Path(target_dir) / f'full_{now_str}.7z'
-            parts = compress_files_with_split(all_files, archive_path, split_size_mb, base_dir=source_dir)
-            click.echo(f'生成分卷: {parts}')
-        else:
-            click.echo('未启用压缩，直接复制源文件到目标目录...')
-            full_backup(source_dir, target_dir, exclude_dirs=exclude_dirs)
-            parts = [str(p) for p in Path(target_dir).glob('*') if p.is_file()]
-        # 全量备份后生成快照
+        # 全量备份前生成快照
         snapshot = {}
         # 统计所有文件路径
         all_files = []
         for root, dirs, files in os.walk(source_dir):
             rel_root = os.path.relpath(root, source_dir).replace("\\", "/")
-            # 递归过滤目录
             dirs[:] = [d for d in dirs if not is_excluded_path((rel_root + "/" + d).lstrip("/"), exclude_dirs)]
             for file in files:
                 rel_file = (rel_root + "/" + file).lstrip("/")
                 if is_excluded_path(rel_file, exclude_dirs):
                     continue
-                all_files.append(str(Path(root) / file))
+                all_files.append((Path(root) / file).as_posix())
         with tqdm(total=len(all_files), desc='生成快照', unit='file') as pbar:
-            with ProcessPoolExecutor() as executor:
+            with ProcessPoolExecutor(max_workers=workers) as executor:
                 future_to_path = {executor.submit(get_file_info, f): f for f in all_files}
                 for future in as_completed(future_to_path):
                     path, info = future.result()
@@ -132,8 +120,29 @@ def backup(type, compress, split_size, workers):
                     pbar.update(1)
         with open(SNAPSHOT_PATH, 'w', encoding='utf-8') as f:
             json.dump(snapshot, f, indent=2)
-        with open(snapshot_history_path, 'w', encoding='utf-8') as f:
+        full_snapshot_history_path = Path(SNAPSHOT_DIR) / f'full_snapshot_{now_str}.json'
+        with open(full_snapshot_history_path, 'w', encoding='utf-8') as f:
             json.dump(snapshot, f, indent=2)
+        if compress_flag:
+            click.echo('直接压缩源目录并分卷...')
+            # 获取所有文件列表
+            all_files = []
+            for root, dirs, files in os.walk(source_dir):
+                rel_root = os.path.relpath(root, source_dir).replace("\\", "/")
+                dirs[:] = [d for d in dirs if not is_excluded_path((rel_root + "/" + d).lstrip("/"), exclude_dirs)]
+                for file in files:
+                    rel_file = (rel_root + "/" + file).lstrip("/")
+                    if is_excluded_path(rel_file, exclude_dirs):
+                        continue
+                    all_files.append((Path(root) / file).as_posix())
+            archive_path = Path(target_dir) / f'full_{now_str}.7z'
+            parts = compress_files_with_split(all_files, archive_path, split_size_mb, base_dir=source_dir)
+            click.echo(f'生成分卷: {parts}')
+        else:
+            click.echo('未启用压缩，直接复制源文件到目标目录...')
+            full_backup(source_dir, target_dir, exclude_dirs=exclude_dirs)
+            parts = [str(p) for p in Path(target_dir).glob('*') if p.is_file()]
+        
     else:
         click.echo('执行增量备份...')
         changed, deleted = incremental_backup(source_dir, SNAPSHOT_PATH, exclude_dirs=exclude_dirs, workers=workers)
@@ -271,7 +280,29 @@ def restore_snapshot(snapshot_file):
 @click.option('--target-dir', type=click.Path(), default=None, help='恢复到的目标目录')
 @click.option('--to-source', is_flag=True, default=False, help='还原到配置文件中的源目录并自动清空')
 def restore_all(snapshot_file, target_dir, to_source):
-    """一键还原到指定快照对应的文件状态，可自动清空源目录"""
+    """
+    一键还原到指定快照对应的文件状态，可自动清空源目录。
+
+    参数:
+        snapshot_file (str): 快照文件路径，文件名需为 snapshot_YYYYMMDD_HHMMSS.json 格式。
+        target_dir (str or None): 还原目标目录路径，若为 None 且 to_source 为 True，则自动还原到配置文件中的源目录。
+        to_source (bool): 是否自动还原到配置文件中的源目录，并在还原前自动清空该目录（排除保护目录）。
+
+    实现流程:
+        1. 解析快照文件名，提取时间戳。
+        2. 读取 config.yaml，获取备份包目录、源目录、排除目录等配置信息。
+        3. 若 to_source 为 True，则将目标目录设为源目录，并在还原前清空（排除保护目录）。
+        4. 在备份包目录中查找最接近快照时间戳且不大于快照的全量包，以及所有相关的增量包。
+        5. 优先使用 7z 命令行解压全量包（支持分卷），若失败则回退到 py7zr 解压。
+        6. 还原快照文件到 SNAPSHOT_PATH。
+        7. 输出还原完成提示。
+
+    注意事项:
+        - 仅支持 .7z 和 .7z.001 格式的备份包。
+        - 若目标目录为源目录且存在，将在还原前清空（排除 exclude_dirs）。
+        - 若未找到合适的全量包，将终止还原操作。
+        - 需要本地已安装 7z 命令行工具或 py7zr 库。
+    """
     import re
     import shutil
     from pathlib import Path

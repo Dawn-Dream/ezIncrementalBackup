@@ -40,7 +40,29 @@ def save_snapshot(snapshot_path, data):
 
 def incremental_backup(source_dir, snapshot_path, exclude_dirs=None, workers=None):
     """
-    优化：先用 size/mtime 粗筛，只有变化的文件才算 md5。
+    增量备份核心函数。（AI生成的文档 自己懒得写:>）
+    该函数通过对比当前源目录与上一次快照，找出本次变动（新增/修改/删除）的文件和目录。
+    
+    参数:
+        source_dir (str): 源目录路径。
+        snapshot_path (str): 快照文件路径。
+        exclude_dirs (set or list, 可选): 需要排除的目录名集合。
+        workers (int, 可选): 并发进程数，None为自动。
+
+    返回:
+        tuple: (changed_files, deleted_all)
+            changed_files: 本次有变动（新增/修改）的文件路径列表
+            deleted_all: 本次被删除的文件和目录路径列表
+
+    实现思路：
+    1. 首先遍历源目录，收集所有文件路径，排除exclude_dirs中指定的目录。
+    2. 多进程方式收集所有文件的mtime和size信息（stat），与快照对比，未变化的直接复用快照信息。
+    3. 对于mtime或size有变化的文件，再多进程计算md5，判断内容是否真正变动。
+    4. 统计所有当前存在的文件和目录路径，形成current_paths集合。
+    5. 对比快照，找出快照中存在但current_paths中不存在的文件和目录，判定为已删除。
+    6. 返回本次变动的文件列表（changed_files）和被删除的文件/目录列表（deleted_all）。
+    7. 最后保存新的快照到snapshot_path。
+
     """
     source = Path(source_dir)
     prev_snapshot = load_snapshot(snapshot_path)
@@ -65,7 +87,10 @@ def incremental_backup(source_dir, snapshot_path, exclude_dirs=None, workers=Non
             future_to_path = {executor.submit(get_file_stat, f): f for f in all_files}
             for future in as_completed(future_to_path):
                 path, mtime, size = future.result()
-                stat_map[path] = (mtime, size)
+                # !暂时解决方案
+                # 统一路径分隔符，忽略 \ 与 / 的区别
+                norm_path = path.replace("\\", "/")
+                stat_map[norm_path] = (mtime, size)
                 pbar.update(1)
     # 第二步：筛选出需要算 md5 的文件
     need_md5 = []

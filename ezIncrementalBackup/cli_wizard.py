@@ -10,13 +10,14 @@ def main_menu():
         choice = questionary.select(
             "请选择操作：",
             choices=[
-                "配置管理",
-                "快照还原",
-                "包浏览",
-                "删除清单应用",
                 "全量备份",
                 "增量备份",
-                "清空源目录",
+                "快照包浏览",
+                "快照还原",
+                "快照包删除",
+                # "删除清单应用",
+                # "清空源目录",
+                "配置管理",
                 "退出"
             ]
         ).ask()
@@ -24,8 +25,10 @@ def main_menu():
             config_manage()
         elif choice == "快照还原":
             snapshot_restore()
-        elif choice == "包浏览":
+        elif choice == "快照包浏览":
             package_browse()
+        elif choice == "快照包删除":
+            snapshot_delete()
         elif choice == "删除清单应用":
             delete_apply()
         elif choice == "全量备份":
@@ -193,6 +196,87 @@ def clean_source_wizard():
             print("源目录已清空！")
         else:
             print(f"源目录不存在: {source_dir}，无需清空")
+
+def snapshot_delete():
+    # 读取 config.yaml 获取快照目录
+    config_path = Path("config.yaml")
+    if not config_path.exists():
+        print("未找到 config.yaml，先用 cli.py init 初始化！")
+        return
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    target_dir = Path(config.get('target', {}).get('path', './test-bk'))
+    snap_dir = target_dir / 'snapshot'
+    
+    snaps = []
+    if snap_dir.exists():
+        snaps = sorted(list(snap_dir.glob("snapshot_*.json")) + list(snap_dir.glob("full_snapshot_*.json")))
+    if not snaps:
+        print("未找到快照文件！")
+        return
+    snap = questionary.select("请选择要删除的快照：", choices=[str(s.name) for s in snaps]).ask()
+    if not snap:
+        return
+    snap_path = snap_dir / snap
+    # 解析快照时间戳
+    import re
+    m = re.match(r'snapshot_(\d{8}_\d{6})', snap)
+    if not m:
+        print("快照文件名格式不正确！")
+        return
+    ts = m.group(1)
+    # 确认
+    if not questionary.confirm(f"确定要删除快照 {snap} 及相关备份包吗？").ask():
+        return
+    # 删除快照文件
+    try:
+        snap_path.unlink()
+        print(f"已删除快照文件: {snap_path}")
+    except Exception as e:
+        print(f"删除快照文件失败: {e}")
+    # 删除全量包快照文件
+    full_snap_name = f"full_snapshot_{ts}.json"
+    full_snap_path = snap_dir / full_snap_name
+    if full_snap_path.exists():
+        try:
+            full_snap_path.unlink()
+            print(f"已删除全量包快照文件: {full_snap_path}")
+        except Exception as e:
+            print(f"删除全量包快照文件失败: {e}")
+    # 删除全量包和增量包
+    pkgs = sorted(list(target_dir.glob("*.7z")) + list(target_dir.glob("*.7z.001")))
+    # 构建基名到包的映射，优先 .7z.001
+    pkg_map = {}
+    for pkg in pkgs:
+        m = re.match(r'(full_\d{8}_\d{6}|incremental_\d{8}_\d{6})\.7z(\.\d{3})?$', pkg.name)
+        if m:
+            base = m.group(1)
+            # 优先 .7z.001
+            if base not in pkg_map or str(pkg).endswith('.7z.001'):
+                pkg_map[base] = pkg
+    # 删除对应全量包（时间戳等于快照）
+    full_base = f"full_{ts}"
+    full_pkg = pkg_map.get(full_base)
+    if full_pkg:
+        # 删除分卷
+        for part in target_dir.glob(f"{full_base}.7z*"):
+            try:
+                part.unlink()
+                print(f"已删除全量包: {part}")
+            except Exception as e:
+                print(f"删除全量包失败: {e}")
+    # 删除所有小于等于快照的增量包
+    for base, pkg in pkg_map.items():
+        if base.startswith('incremental_'):
+            incr_ts = base[12:]
+            if incr_ts <= ts:
+                for part in target_dir.glob(f"{base}.7z*"):
+                    try:
+                        part.unlink()
+                        print(f"已删除增量包: {part}")
+                    except Exception as e:
+                        print(f"删除增量包失败: {e}")
+    print("删除操作完成！")
 
 if __name__ == "__main__":
     main_menu() 
