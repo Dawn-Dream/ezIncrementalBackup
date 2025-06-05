@@ -83,7 +83,7 @@ def backup(type, compress, split_size, workers):
     target = config['target'] # 备份目标
     exclude_dirs = set(config.get('exclude_dirs', [])) # 排除目录
     target_dir = target.get('path', './backup_output') # 备份目标目录
-    workers = workers or config.get('workers', None) # 并发进程数
+    workers = workers or config.get('workers', 1) # 并发进程数
 
     Path(target_dir).mkdir(parents=True, exist_ok=True) # 创建备份目标目录
     SNAPSHOT_DIR = Path(target_dir) / 'snapshot'
@@ -142,6 +142,7 @@ def backup(type, compress, split_size, workers):
             click.echo('未启用压缩，直接复制源文件到目标目录...')
             full_backup(source_dir, target_dir, exclude_dirs=exclude_dirs)
             parts = [str(p) for p in Path(target_dir).glob('*') if p.is_file()]
+        return True
         
     else:
         click.echo('执行增量备份...')
@@ -272,6 +273,13 @@ def upload():
 def restore_snapshot(snapshot_file):
     """恢复快照文件为当前快照基准"""
     import shutil
+    with open('config.yaml', 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    target_dir = config['target'].get('path', './backup_output')
+    snapshot_dir = Path(target_dir) / 'snapshot'
+    snapshot_dir.mkdir(exist_ok=True)
+    global SNAPSHOT_PATH
+    SNAPSHOT_PATH = str(snapshot_dir / 'last_snapshot.json')
     shutil.copy2(snapshot_file, SNAPSHOT_PATH)
     click.echo(f'已恢复快照: {snapshot_file} -> {SNAPSHOT_PATH}')
 

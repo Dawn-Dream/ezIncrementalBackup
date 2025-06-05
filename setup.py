@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="ezIncrementalBackup",
-    version="1.2.0RC2",
+    version="1.2.0RC3   ",
     packages=find_packages(),
     install_requires=[
         'click',

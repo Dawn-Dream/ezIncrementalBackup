@@ -4,6 +4,7 @@ import yaml
 import subprocess
 import os
 import sys
+import re
 
 def main_menu():
     while True:
@@ -222,13 +223,12 @@ def snapshot_delete():
     if not snap:
         return
     snap_path = snap_dir / snap
-    # 解析快照时间戳
-    import re
-    m = re.match(r'snapshot_(\d{8}_\d{6})', snap)
+    # 解析快照时间戳 (支持 snapshot_ 和 full_snapshot_ 两种前缀)
+    m = re.match(r'(?:snapshot_|full_snapshot_)(\d{8}_\d{6})', snap)
     if not m:
         print("快照文件名格式不正确！")
         return
-    ts = m.group(1)
+    ts = m.group(1) # 提取时间戳
     # 确认
     if not questionary.confirm(f"确定要删除快照 {snap} 及相关备份包吗？").ask():
         return
@@ -243,8 +243,10 @@ def snapshot_delete():
     full_snap_path = snap_dir / full_snap_name
     if full_snap_path.exists():
         try:
-            full_snap_path.unlink()
-            print(f"已删除全量包快照文件: {full_snap_path}")
+            # 再次确认是否删除            
+            if questionary.confirm(f"确定要删除全量包快照文件: {full_snap_path}？").ask():
+                full_snap_path.unlink()
+                print(f"已删除全量包快照文件: {full_snap_path}")
         except Exception as e:
             print(f"删除全量包快照文件失败: {e}")
     # 删除全量包和增量包
@@ -281,6 +283,40 @@ def snapshot_delete():
                     except Exception as e:
                         print(f"删除增量包失败: {e}")
     print("删除操作完成！")
+    
+    # 自动回退到上一个快照或全量快照
+    prev_snap = None
+    prev_full = None
+    # 查找所有剩余快照
+    all_snaps = sorted([s for s in snap_dir.glob("snapshot_*.json")])
+    for s in all_snaps:
+        m2 = re.match(r'(?:snapshot_|full_snapshot_)(\d{8}_\d{6})', s.name)
+        if m2 and m2.group(1) < ts:
+            prev_snap = s
+    if prev_snap:
+        print(f"自动回退到上一个快照: {prev_snap.name}")
+        subprocess.run([sys.executable, "-m", "ezIncrementalBackup.cli", "restore-snapshot", str(snap_dir / prev_snap.name)], check=True)
+        return
+    # 没有上一个快照，查找全量快照
+    all_full = sorted([s for s in snap_dir.glob("full_snapshot_*.json")])
+    for s in all_full:
+        m2 = re.match(r'(?:snapshot_|full_snapshot_)(\d{8}_\d{6})', s.name)
+        if m2 and m2.group(1) < ts:
+            prev_full = s
+    if prev_full:
+        print(f"自动回退到上一个全量快照: {prev_full.name}")
+        subprocess.run([sys.executable, "-m", "ezIncrementalBackup.cli", "restore-snapshot", str(snap_dir / prev_full.name)], check=True)
+        return
+    print("没有可用快照可恢复！")
+    # 询问是否删除 last_snapshot.json
+    if questionary.confirm("是否删除 last_snapshot.json？").ask():
+        last_snap_path = snap_dir / 'last_snapshot.json'
+        if last_snap_path.exists():
+            try:
+                last_snap_path.unlink()
+                print(f"已删除 last_snapshot.json: {last_snap_path}")
+            except Exception as e:
+                print(f"删除 last_snapshot.json 失败: {e}")
 
 if __name__ == "__main__":
     main_menu() 
