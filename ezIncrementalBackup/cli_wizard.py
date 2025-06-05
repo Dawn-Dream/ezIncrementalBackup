@@ -166,11 +166,15 @@ def backup(btype):
         workers_input = questionary.text(f"请输入进程数（留空=自动，当前配置={workers}）:").ask()
         if workers_input:
             workers = workers_input
+        else:
+            workers = int(os.cpu_count() * 0.75) % 100
+            print(f"自动设置进程数为: {workers} (75%的cpu核心数)")
     cmd = [sys.executable, "-m", "ezIncrementalBackup.cli", "backup", "--type", btype]
     if workers:
         cmd += ["--workers", str(workers)]
     subprocess.run(cmd, check=True)
     print("备份完成！")
+    return True
 
 def is_excluded(item, source_dir, exclude_dirs):
     rel_path = os.path.relpath(item, source_dir).replace("\\", "/")

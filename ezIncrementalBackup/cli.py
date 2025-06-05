@@ -136,7 +136,7 @@ def backup(type, compress, split_size, workers):
                         continue
                     all_files.append((Path(root) / file).as_posix())
             archive_path = Path(target_dir) / f'full_{now_str}.7z'
-            parts = compress_files_with_split(all_files, archive_path, split_size_mb, base_dir=source_dir)
+            parts = compress_files_with_split(all_files, archive_path, split_size_mb, base_dir=source_dir , workers=workers)
             click.echo(f'生成分卷: {parts}')
         else:
             click.echo('未启用压缩，直接复制源文件到目标目录...')

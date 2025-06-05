@@ -11,56 +11,15 @@ def is_7z_available():
     from shutil import which
     return which("7z") is not None
 
-def compress_with_split(source_dir, archive_path, split_size_mb=1024):
-    """
-    使用7z命令行（如有）或py7zr对source_dir进行分卷压缩，分卷大小为split_size_mb。
-    """
-    source = Path(source_dir)
-    archive = Path(archive_path)
-    split_size = f"-v{split_size_mb}m"
-    if is_7z_available():
-        cmd = [
-            "7z", "a", "-t7z", "-m0=lzma2", "-mx=3", "-mmt=on", split_size,
-            str(archive), str(source)
-        ]
-        print(f"[7z] 正在压缩: {' '.join(cmd)}")
-        result = subprocess.run(cmd)  # 直接输出到终端
-        if result.returncode != 0:
-            raise RuntimeError("7z 压缩失败")
-        parts = sorted(archive.parent.glob(f"{archive.name}.part*"))
-        if not parts:
-            parts = [archive]
-        return [str(p) for p in parts]
-    else:
-        # 回退到 py7zr
-        print("[py7zr] 未检测到7z命令，使用py7zr压缩，速度较慢...")
-        split_size_bytes = int(split_size_mb) * 1024 * 1024
-        with py7zr.SevenZipFile(archive, 'w', filters=[{'id': py7zr.FILTER_LZMA2}]) as archive_file:
-            archive_file.writeall(str(source), arcname='.')
-        file_size = archive.stat().st_size
-        if file_size > split_size_bytes:
-            with open(archive, 'rb') as f:
-                idx = 0
-                while True:
-                    chunk = f.read(split_size_bytes)
-                    if not chunk:
-                        break
-                    part_path = archive.parent / f"{archive.name}.part{idx+1}"
-                    with open(part_path, 'wb') as pf:
-                        pf.write(chunk)
-                    idx += 1
-            archive.unlink()  # 删除原始大包
-            return [str(archive.parent / f"{archive.name}.part{i+1}") for i in range(idx)]
-        else:
-            return [str(archive)]
 
-def compress_files_with_split(file_list, archive_path, split_size_mb=1024, base_dir=None):
+def compress_files_with_split(file_list, archive_path, split_size_mb=1024, base_dir=None , workers=1):
     """
     压缩指定文件列表，优先用7z命令行，否则用py7zr。
     file_list: 需要压缩的文件路径列表
     archive_path: 压缩包输出路径
     split_size_mb: 分卷大小（单位MB），默认1024
     base_dir: 相对路径基准目录，压缩包内文件路径以此为基准
+    workers: 压缩线程数，默认1
     """
     archive = Path(archive_path).resolve()
     split_size = f"-v{split_size_mb}m"
@@ -74,7 +33,7 @@ def compress_files_with_split(file_list, archive_path, split_size_mb=1024, base_
                 f.write(f"{Path(rel_path).as_posix()}\n")
         # 7z 命令用 filelist.txt 的绝对路径，防止找不到
         cmd = [
-            "7z", "a", "-t7z", "-m0=lzma2", "-mx=3", "-mmt=on", split_size,
+            "7z", "a", "-t7z", "-m0=lzma2", "-mx=3", f"-mmt={workers}", split_size,
             str(archive), f"@{filelist_path.as_posix()}", "-spf2"
         ]
         print(f"[7z] 正在压缩: {' '.join(cmd)}")
