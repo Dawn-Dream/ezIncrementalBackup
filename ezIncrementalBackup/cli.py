@@ -16,6 +16,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import re
 import py7zr
 from .utils import is_excluded_path
+import shutil
+import glob
 
 CONFIG_PATH = 'config.yaml'
 
@@ -146,8 +148,17 @@ def backup(type, compress, split_size, workers):
         
     else:
         click.echo('执行增量备份...')
+        
+        source_snapshot_dir = Path(source_dir) / '_snapshot'
+        if source_snapshot_dir.exists():
+            shutil.rmtree(source_snapshot_dir)
+        shutil.copytree(SNAPSHOT_DIR, source_snapshot_dir)
+        clean_old_snapshots(source_snapshot_dir, keep=7)
+        
+
         changed, deleted = incremental_backup(source_dir, SNAPSHOT_PATH, exclude_dirs=exclude_dirs, workers=workers)
         files_to_pack = changed.copy()
+        files_to_pack.append(str(source_snapshot_dir))
         deleted_list_arcname = None
         valid_deleted = []
         if deleted:
@@ -172,6 +183,8 @@ def backup(type, compress, split_size, workers):
             archive_path = Path(target_dir) / f'incremental_{now_str}.7z'
             parts = compress_files_with_split(files_to_pack, archive_path, split_size_mb, base_dir=source_dir)
             click.echo(f'生成分卷: {parts}')
+            
+                
         elif files_to_pack:
             parts = files_to_pack
         else:
@@ -181,6 +194,9 @@ def backup(type, compress, split_size, workers):
             del_path = Path(source_dir) / deleted_list_arcname
             if del_path.exists():
                 os.remove(del_path)
+        # 删除临时的_snapshot文件夹
+            if source_snapshot_dir.exists():
+                shutil.rmtree(source_snapshot_dir)
 
     # WebDAV上传
     if target['type'] == 'webdav':
@@ -192,8 +208,9 @@ def backup(type, compress, split_size, workers):
 
     # 备份完成后保存快照副本
     if Path(SNAPSHOT_PATH).exists():
-        import shutil
         shutil.copy2(SNAPSHOT_PATH, snapshot_history_path)
+
+    
 
 @cli.command()
 @click.argument('archive', type=click.Path(exists=True))
@@ -201,9 +218,6 @@ def backup(type, compress, split_size, workers):
 def restore(archive, target_dir):
     """恢复备份（支持自动同步删除）"""
     import py7zr
-    import shutil
-    from pathlib import Path
-    import os
     click.echo(f"解压 {archive} ...")
     if target_dir is None:
         with py7zr.SevenZipFile(archive, mode='r') as z:
@@ -256,7 +270,7 @@ def show_snapshot():
 
 @cli.command()
 def upload():
-    """上传备份到WebDAV"""
+    """（弃用）上传备份到WebDAV"""
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     target = config['target']
@@ -272,7 +286,6 @@ def upload():
 @click.argument('snapshot_file', type=click.Path(exists=True))
 def restore_snapshot(snapshot_file):
     """恢复快照文件为当前快照基准"""
-    import shutil
     with open('config.yaml', 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     target_dir = config['target'].get('path', './backup_output')
@@ -381,7 +394,6 @@ def restore_all(snapshot_file, target_dir, to_source):
     click.echo(f'解压全量包: {full_pkg}')
     # 优先用 7z 命令行解压分卷包
     def try_7z_extract(pkg, target_dir):
-        import shutil
         import subprocess
         pkg = str(pkg)
         target_dir = str(target_dir)
@@ -421,7 +433,14 @@ def restore_all(snapshot_file, target_dir, to_source):
         click.echo('不支持的包类型，请选择 .7z 或 .7z.001 文件')
         return
     # 5. 还原快照
+    snapshot_dir = backup_dir / 'snapshot'
+    snapshot_dir.mkdir(exist_ok=True)
+    global SNAPSHOT_PATH
+    SNAPSHOT_PATH = str(snapshot_dir / 'last_snapshot.json')
     shutil.copy2(snapshot_file, SNAPSHOT_PATH)
+    # 删除snapshot_file下的.snapshot/文件夹
+    if snapshot_dir.exists():
+        shutil.rmtree(snapshot_dir)
     click.echo(f'已恢复快照: {snapshot_file} -> {SNAPSHOT_PATH}')
     click.echo('一键还原完成！')
 
@@ -430,7 +449,6 @@ def restore_all(snapshot_file, target_dir, to_source):
 def apply_delete(deleted_list):
     """根据删除清单批量删除源目录下的文件和文件夹"""
     import yaml
-    import shutil
     from pathlib import Path
     with open('config.yaml', 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
@@ -484,7 +502,6 @@ def apply_delete(deleted_list):
 def clean_source():
     """清空配置文件中的源目录"""
     import yaml
-    import shutil
     from pathlib import Path
     import os
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
@@ -498,6 +515,20 @@ def clean_source():
         click.echo(f"已清空目录: {source_dir}")
     else:
         click.echo(f"源目录不存在: {source_dir}，无需清空")
+
+def clean_old_snapshots(snapshot_dir, keep=7):
+    # 获取所有快照文件（按修改时间排序，最新的在前）
+    files = sorted(
+        Path(snapshot_dir).glob('*.json'),
+        key=lambda f: f.stat().st_mtime,
+        reverse=True
+    )
+    # 只保留最新的 keep 个，其他删除
+    for f in files[keep:]:
+        try:
+            f.unlink()
+        except Exception as e:
+            print(f"删除快照失败: {f}，原因: {e}")
 
 if '--gui' in sys.argv:
     sys.argv.remove('--gui')
