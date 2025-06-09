@@ -77,15 +77,22 @@ def config_manage():
         print("已保存新配置！")
 
 def snapshot_restore():
-    snap_dir = Path("snapshot")
-    snaps = sorted(snap_dir.glob("snapshot_*.json")) if snap_dir.exists() else []
+    config_path = Path("config.yaml")
+    if not config_path.exists():
+        print("未找到 config.yaml，先用 cli.py init 初始化！")
+        return
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    snap_dir = Path(config.get('target', {}).get('path', './test-bk')) / 'snapshot'
+    snaps = sorted(snap_dir.glob("*.json")) if snap_dir.exists() else []
     if not snaps:
         print("未找到快照文件！")
         return
     snap = questionary.select("请选择要还原的快照：", choices=[str(s.name) for s in snaps]).ask()
     if snap:
         print(f"正在还原快照: {snap} ...")
-        subprocess.run([sys.executable, "-m", "ezIncrementalBackup.cli", "restore-all", f"snapshot/{snap}", "--to-source"], check=True)
+        snap_path = str((snap_dir / snap).resolve())
+        subprocess.run([sys.executable, "-m", "ezIncrementalBackup.cli", "restore-all", snap_path, "--to-source"], check=True)
         print("还原完成！")
 
 def package_browse():
@@ -170,6 +177,9 @@ def backup(btype):
         else:
             workers = int(os.cpu_count() * 0.75) % 100
             print(f"自动设置进程数为: {workers} (75%的cpu核心数)")
+    # 交互式询问是否开始备份
+    if not questionary.confirm("是否开始备份？").ask():
+        return False
     cmd = [sys.executable, "-m", "ezIncrementalBackup.cli", "backup", "--type", btype]
     if workers:
         cmd += ["--workers", str(workers)]
